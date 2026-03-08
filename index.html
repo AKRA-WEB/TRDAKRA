@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ระบบเบิกจ่ายสินค้า W1-W2</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Material Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <style>
+        /* Custom Styles & Animations */
+        body { font-family: 'Sarabun', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .animate-fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        /* Hide scrollbar for cleaner look */
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+        
+        /* Loading Overlay */
+        #loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            z-index: 9999;
+            align-items: center; justify-content: center; flex-direction: column;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="flex">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-3"></div>
+        <p class="text-gray-600 font-medium" id="loading-text">กำลังโหลดข้อมูล...</p>
+    </div>
+
+    <div id="app-root" class="min-h-screen flex justify-center">
+        <!-- Content will be injected here by JavaScript -->
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. CONFIGURATION & STATE
+        // ==========================================
+        // นำ Web App URL ที่ได้จาก Google Apps Script มาใส่ตรงนี้
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwhAcZVMH2jr2dgD6VKMM-ED72PX6dLMTZF_lOxRaTrC8yR_KZNKegqjpaROPSE7QF9/exec';
+
+        let state = {
+            view: 'home', // 'home', 'w1', 'w2'
+            w1Tab: 'request', // 'request', 'pending', 'history'
+            w2Tab: 'tasks', // 'tasks', 'history'
+            selectedReceiveId: null, // ID ของรายการที่กำลังกดรับสินค้าหน้าร้าน
+            items: [], // รายการเบิกสินค้า
+            products: [] // รายชื่อสินค้าจากชีต Product
+        };
+
+        // แสดง/ซ่อน Loading
+        function showLoading(text = 'กำลังทำงาน...') {
+            document.getElementById('loading-text').innerText = text;
+            document.getElementById('loading-overlay').style.display = 'flex';
+        }
+
+        function hideLoading() {
+            document.getElementById('loading-overlay').style.display = 'none';
+        }
+
+        // ==========================================
+        // 2. API FUNCTIONS (FETCH)
+        // ==========================================
+        // ฟังก์ชันโหลดข้อมูลจาก Sheet ตอนเปิดเว็บ (ดึงทั้งรายการเบิก และ รายชื่อสินค้า)
+        async function fetchInitialData() {
+            if (APPS_SCRIPT_URL === 'https://script.google.com/macros/s/AKfycbw-oW1j7jB2oCQLRZ3_k-OKtVKk4xVQHQNlZaZn9IBzHYHlzYONmRaLaj0YD5gZhTz9/exec') {
+                hideLoading();
+                alert('คำเตือน: กรุณาใส่ APPS_SCRIPT_URL ในไฟล์ HTML ก่อนใช้งานจริง');
+                return;
+            }
+
+            try {
+                // 1. ดึงรายการเบิกจ่าย
+                const itemsResponse = await fetch(`${APPS_SCRIPT_URL}?action=getItems`);
+                const itemsData = await itemsResponse.json();
+                state.items = itemsData || [];
+
+                // 2. ดึงรายชื่อสินค้าจากชีต Product สำหรับตัวเลือก Autocomplete
+                const productsResponse = await fetch(`${APPS_SCRIPT_URL}?action=getProducts`);
+                const productsData = await productsResponse.json();
+                state.products = productsData || [];
+
+                render();
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                alert('ไม่สามารถเชื่อมต่อกับฐานข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // ฟังก์ชันบันทึกข้อมูลไปที่ Sheet
+        async function syncDataToSheet() {
+            if (APPS_SCRIPT_URL === 'ใส่_URL_WEB_APP_ของ_คุณที่นี่') return;
+
+            showLoading('กำลังบันทึกข้อมูล...');
+            try {
+                // ส่งเป็น text/plain เพื่อเลี่ยงปัญหา CORS Preflight ใน Apps Script
+                await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(state.items)
+                });
+            } catch (error) {
+                console.error('Error saving data:', error);
+                alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // ==========================================
+        // 3. ACTION HANDLERS
+        // ==========================================
+        function setView(viewName) {
+            state.view = viewName;
+            state.selectedReceiveId = null;
+            render();
+        }
+
+        function setW1Tab(tabName) {
+            state.w1Tab = tabName;
+            state.selectedReceiveId = null;
+            render();
+        }
+
+        function setW2Tab(tabName) {
+            state.w2Tab = tabName;
+            render();
+        }
+
+        async function handleW1Submit(event) {
+            event.preventDefault();
+            const itemName = document.getElementById('w1-itemName').value;
+            const qty = document.getElementById('w1-qty').value;
+            const oldExpiry = document.getElementById('w1-oldExpiry').value;
+
+            if (!itemName || !qty) return;
+
+            const newItem = {
+                id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
+                timestamp: new Date().toLocaleString('th-TH'),
+                itemName: itemName,
+                requestQty: parseInt(qty),
+                status: 'สั่งเบิก',
+                oldExpiry: oldExpiry || 'ไม่ได้ระบุ',
+                newExpiry: '',
+                receiveQty: null,
+                receiveNote: ''
+            };
+
+            state.items.unshift(newItem); 
+            state.w1Tab = 'pending'; 
+            render(); // อัปเดต UI ทันที
+            
+            await syncDataToSheet(); // บันทึกฉากหลัง
+            alert('ส่งคำขอเบิกสินค้าเรียบร้อยแล้ว!');
+        }
+
+        function openReceiveForm(id) {
+            state.selectedReceiveId = id;
+            render();
+        }
+
+        async function handleReceiveSubmit(event, id, reqQty) {
+            event.preventDefault();
+            const receiveQty = parseInt(document.getElementById(`recv-qty-${id}`).value);
+            const newExpiry = document.getElementById(`recv-exp-${id}`).value;
+
+            let note = 'ครบ';
+            if (receiveQty < reqQty) note = `ขาด ${reqQty - receiveQty}`;
+            if (receiveQty > reqQty) note = `เกิน ${receiveQty - reqQty}`;
+
+            state.items = state.items.map(item => {
+                if (item.id === id) {
+                    return { ...item, status: 'รับสินค้าแล้ว', receiveQty: receiveQty, receiveNote: note, newExpiry: newExpiry || 'ไม่ได้ระบุ' };
+                }
+                return item;
+            });
+
+            state.selectedReceiveId = null;
+            render();
+            await syncDataToSheet();
+        }
+
+        async function updateItemStatus(id, newStatus) {
+            state.items = state.items.map(item => item.id === id ? { ...item, status: newStatus } : item);
+            render();
+            await syncDataToSheet();
+        }
+
+        // ==========================================
+        // 4. UI RENDERING LOGIC
+        // ==========================================
+        function getStatusBadge(status) {
+            const styles = {
+                'สั่งเบิก': 'bg-blue-100 text-blue-700 border-blue-200',
+                'กำลังจัดสินค้า': 'bg-yellow-100 text-yellow-700 border-yellow-200',
+                'รอรับสินค้า': 'bg-orange-100 text-orange-700 border-orange-200 animate-pulse',
+                'รับสินค้าแล้ว': 'bg-green-100 text-green-700 border-green-200',
+                'สินค้าหมด': 'bg-red-100 text-red-700 border-red-200'
+            };
+            return `<span class="px-2 py-1 rounded-md text-xs font-bold border ${styles[status] || 'bg-gray-100'}">${status}</span>`;
+        }
+
+        function renderEmptyState(message, iconName) {
+            return `
+                <div class="flex flex-col items-center justify-center py-12 text-gray-400">
+                    <span class="material-icons-round text-gray-300 mb-2" style="font-size: 48px;">${iconName}</span>
+                    <p class="text-lg font-medium">${message}</p>
+                </div>
+            `;
+        }
+
+        function renderHistoryList(role) {
+            const historyItems = state.items.filter(i => ['รับสินค้าแล้ว', 'สินค้าหมด'].includes(i.status));
+            if (historyItems.length === 0) return renderEmptyState('ยังไม่มีประวัติ', 'history');
+
+            return `
+                <div class="space-y-3">
+                    ${historyItems.map(item => `
+                        <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 opacity-80">
+                            <div class="flex justify-between items-center mb-2">
+                                <h3 class="font-bold text-gray-800">${item.itemName}</h3>
+                                ${getStatusBadge(item.status)}
+                            </div>
+                            <div class="text-xs text-gray-500 space-y-1">
+                                <p>รหัส: ${item.id} | วันที่เบิก: ${item.timestamp}</p>
+                                ${item.status === 'รับสินค้าแล้ว' ? `
+                                    <p>ขอเบิก: <span class="font-medium">${item.requestQty}</span> | รับจริง: <span class="font-medium text-green-600">${item.receiveQty}</span></p>
+                                    ${item.receiveNote && item.receiveNote !== 'ครบ' ? `<p class="text-red-500 font-medium">หมายเหตุ: ได้รับ${item.receiveNote}</p>` : ''}
+                                    ${role === 'w1' ? `<p>หมดอายุล็อตใหม่: ${item.newExpiry}</p>` : ''}
+                                ` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // --- Render Screens ---
+        function renderHome() {
+            return `
+                <div class="w-full max-w-sm flex flex-col items-center justify-center p-4">
+                    <div class="bg-white p-8 rounded-3xl shadow-lg w-full text-center">
+                        <div class="bg-blue-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600">
+                            <span class="material-icons-round" style="font-size: 40px;">inventory_2</span>
+                        </div>
+                        <h1 class="text-2xl font-bold text-gray-800 mb-2">ระบบเบิกจ่ายสินค้า</h1>
+                        <p class="text-gray-500 mb-8 text-sm">เลือกระบบที่คุณต้องการเข้าใช้งาน</p>
+                        
+                        <div class="space-y-4">
+                            <button onclick="setView('w1')" class="w-full bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-xl font-semibold flex items-center justify-center gap-3 transition-colors shadow-sm active:scale-95">
+                                <span class="material-icons-round">storefront</span> พนักงานหน้าร้าน (W1)
+                            </button>
+                            
+                            <button onclick="setView('w2')" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white p-4 rounded-xl font-semibold flex items-center justify-center gap-3 transition-colors shadow-sm active:scale-95">
+                                <span class="material-icons-round">warehouse</span> พนักงานคลังสินค้า (W2)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderW1() {
+            const hasPending = state.items.some(i => i.status === 'รอรับสินค้า');
+            
+            let content = '';
+            if (state.w1Tab === 'request') {
+                content = `
+                    <form onsubmit="handleW1Submit(event)" class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 space-y-4 animate-fade-in">
+                        <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 mb-4">
+                            <span class="material-icons-round text-blue-500">add_circle</span> สร้างรายการเบิกใหม่
+                        </h2>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">ชื่อรายการสินค้า *</label>
+                            <input type="text" id="w1-itemName" list="product-list" autocomplete="off" required class="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="พิมพ์เพื่อค้นหา หรือเลือกจากรายการ...">
+                            <datalist id="product-list">
+                                ${state.products.map(product => `<option value="${product}"></option>`).join('')}
+                            </datalist>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">จำนวน *</label>
+                                <input type="number" id="w1-qty" required min="1" class="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg font-semibold" placeholder="0">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">วันหมดอายุเก่า</label>
+                                <input type="date" id="w1-oldExpiry" class="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="w-full bg-blue-600 text-white font-bold py-4 rounded-xl mt-4 hover:bg-blue-700 transition active:scale-95 shadow-md">
+                            ยืนยันการเบิกสินค้า
+                        </button>
+                    </form>
+                `;
+            } else if (state.w1Tab === 'pending') {
+                const pendingItems = state.items.filter(i => ['สั่งเบิก', 'กำลังจัดสินค้า', 'รอรับสินค้า'].includes(i.status));
+                if (pendingItems.length === 0) {
+                    content = renderEmptyState('ไม่มีรายการที่รอรับ', 'check_circle');
+                } else {
+                    content = `<div class="space-y-4 animate-fade-in">` + pendingItems.map(item => `
+                        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                            <div class="flex justify-between items-start mb-2">
+                                <div>
+                                    <span class="text-xs text-gray-400 font-mono">${item.id}</span>
+                                    <h3 class="font-bold text-gray-800 text-lg">${item.itemName}</h3>
+                                </div>
+                                ${getStatusBadge(item.status)}
+                            </div>
+                            
+                            <div class="text-sm text-gray-600 mb-4 bg-gray-50 p-2 rounded-lg">
+                                <p>ยอดเบิก: <span class="font-bold text-blue-600">${item.requestQty}</span> ชิ้น</p>
+                                <p class="text-xs mt-1 text-gray-500">เวลา: ${item.timestamp}</p>
+                            </div>
+
+                            ${item.status === 'รอรับสินค้า' && state.selectedReceiveId !== item.id ? `
+                                <button onclick="openReceiveForm('${item.id}')" class="w-full bg-green-500 text-white font-bold py-3 rounded-xl hover:bg-green-600 active:scale-95 transition">
+                                    เช็คและรับสินค้า
+                                </button>
+                            ` : ''}
+
+                            ${state.selectedReceiveId === item.id ? `
+                                <form onsubmit="handleReceiveSubmit(event, '${item.id}', ${item.requestQty})" class="mt-4 pt-4 border-t border-gray-200 animate-fade-in">
+                                    <h4 class="font-bold text-gray-800 mb-3 text-center">ฟอร์มตรวจรับสินค้า</h4>
+                                    <div class="space-y-3">
+                                        <div>
+                                            <label class="block text-xs font-medium text-gray-700 mb-1">จำนวนที่ได้รับจริง (ชิ้น)</label>
+                                            <input type="number" id="recv-qty-${item.id}" required min="0" value="${item.requestQty}" class="w-full p-3 border-2 border-green-200 rounded-xl focus:ring-0 focus:border-green-500 text-center text-xl font-bold text-green-700">
+                                            <p class="text-xs text-gray-500 mt-1">* หากได้ไม่ตรงยอด ระบบจะบันทึกหมายเหตุให้อัตโนมัติ</p>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-medium text-gray-700 mb-1">วันหมดอายุของล็อตใหม่ *</label>
+                                            <input type="date" id="recv-exp-${item.id}" required class="w-full p-3 border border-gray-300 rounded-xl">
+                                        </div>
+                                        <div class="flex gap-2 pt-2">
+                                            <button type="button" onclick="openReceiveForm(null)" class="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-medium">ยกเลิก</button>
+                                            <button type="submit" class="flex-[2] bg-green-600 text-white py-3 rounded-xl font-bold shadow-md">ยืนยันการรับ</button>
+                                        </div>
+                                    </div>
+                                </form>
+                            ` : ''}
+                        </div>
+                    `).join('') + `</div>`;
+                }
+            } else if (state.w1Tab === 'history') {
+                content = renderHistoryList('w1');
+            }
+
+            return `
+                <div class="w-full max-w-md bg-white shadow-xl min-h-screen flex flex-col relative">
+                    <!-- Header -->
+                    <header class="bg-blue-600 text-white p-4 flex items-center shadow-md sticky top-0 z-10">
+                        <button onclick="setView('home')" class="mr-3 p-1 rounded-full hover:bg-blue-700 transition">
+                            <span class="material-icons-round">chevron_left</span>
+                        </button>
+                        <h1 class="text-xl font-bold flex items-center gap-2">
+                            <span class="material-icons-round">storefront</span> หน้าร้าน (W1)
+                        </h1>
+                    </header>
+
+                    <!-- Tabs -->
+                    <div class="flex border-b bg-white sticky top-[60px] z-10 shadow-sm">
+                        <button onclick="setW1Tab('request')" class="flex-1 py-3 text-sm font-medium border-b-2 ${state.w1Tab === 'request' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'}">เบิกสินค้า</button>
+                        <button onclick="setW1Tab('pending')" class="flex-1 py-3 text-sm font-medium border-b-2 relative ${state.w1Tab === 'pending' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'}">
+                            รอรับสินค้า
+                            ${hasPending ? `<span class="absolute top-2 right-2 flex h-3 w-3"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span><span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span></span>` : ''}
+                        </button>
+                        <button onclick="setW1Tab('history')" class="flex-1 py-3 text-sm font-medium border-b-2 ${state.w1Tab === 'history' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'}">ประวัติ</button>
+                    </div>
+
+                    <!-- Main Content -->
+                    <main class="flex-1 overflow-y-auto p-4 pb-20 bg-gray-50">
+                        ${content}
+                    </main>
+                </div>
+            `;
+        }
+
+        function renderW2() {
+            const hasTasks = state.items.some(i => ['สั่งเบิก', 'กำลังจัดสินค้า'].includes(i.status));
+            
+            let content = '';
+            if (state.w2Tab === 'tasks') {
+                const activeTasks = state.items.filter(i => ['สั่งเบิก', 'กำลังจัดสินค้า'].includes(i.status));
+                if (activeTasks.length === 0) {
+                    content = renderEmptyState('ไม่มีงานจัดสินค้าในขณะนี้', 'inventory');
+                } else {
+                    content = `<div class="space-y-4 animate-fade-in">` + activeTasks.map(item => `
+                        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 border-l-4 border-l-indigo-500">
+                            <div class="flex justify-between items-start mb-2">
+                                <div>
+                                    <span class="text-xs text-gray-400 font-mono">${item.id}</span>
+                                    <h3 class="font-bold text-gray-800 text-lg">${item.itemName}</h3>
+                                </div>
+                                ${getStatusBadge(item.status)}
+                            </div>
+                            
+                            <div class="grid grid-cols-2 gap-2 text-sm text-gray-600 mb-4 bg-gray-50 p-3 rounded-lg">
+                                <div>
+                                    <p class="text-xs text-gray-500 mb-1">จำนวนที่เบิก</p>
+                                    <p class="font-bold text-xl text-indigo-600">${item.requestQty}</p>
+                                </div>
+                                <div>
+                                    <p class="text-xs text-gray-500 mb-1">วันหมดอายุของเก่า</p>
+                                    <p class="font-medium text-gray-800">${item.oldExpiry}</p>
+                                </div>
+                            </div>
+
+                            ${item.status === 'สั่งเบิก' ? `
+                                <div class="flex gap-2">
+                                    <button onclick="updateItemStatus('${item.id}', 'สินค้าหมด')" class="flex-1 py-3 text-red-600 font-medium border border-red-200 rounded-xl hover:bg-red-50">สินค้าหมด</button>
+                                    <button onclick="updateItemStatus('${item.id}', 'กำลังจัดสินค้า')" class="flex-[2] py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-md">เริ่มจัดสินค้า</button>
+                                </div>
+                            ` : ''}
+
+                            ${item.status === 'กำลังจัดสินค้า' ? `
+                                <button onclick="updateItemStatus('${item.id}', 'รอรับสินค้า')" class="w-full py-4 bg-orange-500 text-white font-bold rounded-xl hover:bg-orange-600 shadow-md flex justify-center items-center gap-2 text-lg active:scale-95 transition">
+                                    จัดเสร็จแล้ว ส่งไปหน้าร้าน! <span class="material-icons-round">arrow_forward</span>
+                                </button>
+                            ` : ''}
+                        </div>
+                    `).join('') + `</div>`;
+                }
+            } else if (state.w2Tab === 'history') {
+                content = renderHistoryList('w2');
+            }
+
+            return `
+                <div class="w-full max-w-md bg-white shadow-xl min-h-screen flex flex-col relative">
+                    <!-- Header -->
+                    <header class="bg-indigo-600 text-white p-4 flex items-center shadow-md sticky top-0 z-10">
+                        <button onclick="setView('home')" class="mr-3 p-1 rounded-full hover:bg-indigo-700 transition">
+                            <span class="material-icons-round">chevron_left</span>
+                        </button>
+                        <h1 class="text-xl font-bold flex items-center gap-2">
+                            <span class="material-icons-round">warehouse</span> คลังสินค้า (W2)
+                        </h1>
+                    </header>
+
+                    <!-- Tabs -->
+                    <div class="flex border-b bg-white sticky top-[60px] z-10 shadow-sm">
+                        <button onclick="setW2Tab('tasks')" class="flex-1 py-3 text-sm font-medium border-b-2 relative ${state.w2Tab === 'tasks' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500'}">
+                            งานที่ต้องทำ
+                            ${hasTasks ? `<span class="absolute top-2 right-4 flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span></span>` : ''}
+                        </button>
+                        <button onclick="setW2Tab('history')" class="flex-1 py-3 text-sm font-medium border-b-2 ${state.w2Tab === 'history' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500'}">ประวัติการจ่าย</button>
+                    </div>
+
+                    <!-- Main Content -->
+                    <main class="flex-1 overflow-y-auto p-4 pb-20 bg-gray-50">
+                        ${content}
+                    </main>
+                </div>
+            `;
+        }
+
+        // Main Render Function
+        function render() {
+            const root = document.getElementById('app-root');
+            if (state.view === 'home') {
+                root.innerHTML = renderHome();
+            } else if (state.view === 'w1') {
+                root.innerHTML = renderW1();
+            } else if (state.view === 'w2') {
+                root.innerHTML = renderW2();
+            }
+        }
+
+        // ==========================================
+        // 5. INITIALIZATION
+        // ==========================================
+        window.onload = function() {
+            showLoading('กำลังโหลดข้อมูลเบิกจ่าย...');
+            fetchInitialData();
+        };
+
+    </script>
+</body>
+</html>
