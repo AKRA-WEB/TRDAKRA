@@ -73,7 +73,7 @@
         // 2. API FUNCTIONS (FETCH)
         // ==========================================
         async function fetchInitialData() {
-            if (APPS_SCRIPT_URL === 'ใส่_URL_WEB_APP_ของ_คุณที่นี่' || APPS_SCRIPT_URL.includes('ใส่_URL')) {
+            if (APPS_SCRIPT_URL === 'https://script.google.com/macros/s/AKfycbx-Ws9SpeDD0c3bDynhUSABHsonp0bGTPkClfV5WIinwtcE8QghT75zz4u76U7ZK-_GlA/exec' || APPS_SCRIPT_URL.includes('ใส่_URL')) {
                 hideLoading();
                 alert('คำเตือน: กรุณาใส่ APPS_SCRIPT_URL ในไฟล์ HTML ก่อนใช้งานจริง');
                 return;
@@ -89,7 +89,7 @@
                 const productsResponse = await fetch(`${APPS_SCRIPT_URL}?action=getProducts`);
                 const productsData = await productsResponse.json();
                 
-                // --- ป้องกันการแสดงผล [object Object] ---
+                // --- ป้องกันการแสดงผล [object Object] และจัดรูปแบบข้อมูล ---
                 if (Array.isArray(productsData)) {
                     state.products = productsData.map(p => {
                         if (typeof p === 'object' && p !== null) {
@@ -111,7 +111,7 @@
         }
 
         async function syncDataToSheet() {
-            if (APPS_SCRIPT_URL === 'https://script.google.com/macros/s/AKfycbyMY-9PUXHjLKB0QI-9VQiK0CWnfY8LqYGSkWI_DKAzV1NiBoZcDxu0dv6KDBuNP3toOA/exec' || APPS_SCRIPT_URL.includes('ใส่_URL')) return;
+            if (APPS_SCRIPT_URL === 'ใส่_URL_WEB_APP_ของ_คุณที่นี่' || APPS_SCRIPT_URL.includes('ใส่_URL')) return;
 
             showLoading('กำลังบันทึกข้อมูล...');
             try {
@@ -135,20 +135,28 @@
             const listDiv = document.getElementById('autocomplete-list');
             if (!listDiv) return;
 
-            // ถ้าไม่มีคำค้นหา ให้แสดงสินค้า 50 รายการแรก
             const q = query.toLowerCase().trim();
             let filtered = [];
             
             if (!q) {
                 filtered = state.products.slice(0, 50);
             } else {
-                filtered = state.products.filter(p => p.toLowerCase().includes(q)).slice(0, 50); // จำกัด 50 รายการเพื่อไม่ให้เครื่องกระตุก
+                filtered = state.products.filter(p => p.toLowerCase().includes(q)).slice(0, 50); // จำกัด 50 รายการ
             }
 
+            // --- ส่วนที่ปรับปรุง: แจ้งเตือนหากดึงข้อมูลมาไม่ได้ ---
             if (filtered.length === 0) {
-                listDiv.innerHTML = `<div class="p-4 text-sm text-gray-500 text-center">ไม่พบสินค้าที่ค้นหา</div>`;
+                if (state.products.length === 0) {
+                    listDiv.innerHTML = `
+                        <div class="p-4 text-center">
+                            <span class="material-icons-round text-red-400 text-3xl mb-1">error_outline</span>
+                            <p class="text-sm font-bold text-red-500">ไม่พบฐานข้อมูลสินค้า</p>
+                            <p class="text-xs text-gray-500 mt-1">1. ลืม Deploy Code.gs เป็นเวอร์ชันใหม่<br>2. ลืมตั้งชื่อชีตว่า Product</p>
+                        </div>`;
+                } else {
+                    listDiv.innerHTML = `<div class="p-4 text-sm text-gray-500 text-center">ไม่พบสินค้าที่ค้นหา</div>`;
+                }
             } else {
-                // สร้างรายการ Dropdown (ใช้ encodeURIComponent ป้องกันชื่อสินค้าที่มีอักขระพิเศษ)
                 listDiv.innerHTML = filtered.map(p => `
                     <div onclick="selectProduct(decodeURIComponent('${encodeURIComponent(p)}'))" 
                          class="p-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 text-sm text-gray-800 last:border-0 truncate flex items-center gap-2">
