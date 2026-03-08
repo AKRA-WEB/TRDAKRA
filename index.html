@@ -18,6 +18,8 @@
         }
         /* Hide scrollbar for cleaner look */
         ::-webkit-scrollbar { width: 0px; background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         
         /* Loading Overlay */
         #loading-overlay {
@@ -53,12 +55,11 @@
             view: 'home', // 'home', 'w1', 'w2'
             w1Tab: 'request', // 'request', 'pending', 'history'
             w2Tab: 'tasks', // 'tasks', 'history'
-            selectedReceiveId: null, // ID ของรายการที่กำลังกดรับสินค้าหน้าร้าน
-            items: [], // รายการเบิกสินค้า
-            products: [] // รายชื่อสินค้าจากชีต Product
+            selectedReceiveId: null, 
+            items: [], 
+            products: [] // รายชื่อสินค้าจากชีต Product จะถูกเก็บที่นี่
         };
 
-        // แสดง/ซ่อน Loading
         function showLoading(text = 'กำลังทำงาน...') {
             document.getElementById('loading-text').innerText = text;
             document.getElementById('loading-overlay').style.display = 'flex';
@@ -71,9 +72,8 @@
         // ==========================================
         // 2. API FUNCTIONS (FETCH)
         // ==========================================
-        // ฟังก์ชันโหลดข้อมูลจาก Sheet ตอนเปิดเว็บ (ดึงทั้งรายการเบิก และ รายชื่อสินค้า)
         async function fetchInitialData() {
-            if (APPS_SCRIPT_URL === 'https://script.google.com/macros/s/AKfycbw-oW1j7jB2oCQLRZ3_k-OKtVKk4xVQHQNlZaZn9IBzHYHlzYONmRaLaj0YD5gZhTz9/exec') {
+            if (APPS_SCRIPT_URL === 'ใส่_URL_WEB_APP_ของ_คุณที่นี่' || APPS_SCRIPT_URL.includes('ใส่_URL')) {
                 hideLoading();
                 alert('คำเตือน: กรุณาใส่ APPS_SCRIPT_URL ในไฟล์ HTML ก่อนใช้งานจริง');
                 return;
@@ -85,10 +85,21 @@
                 const itemsData = await itemsResponse.json();
                 state.items = itemsData || [];
 
-                // 2. ดึงรายชื่อสินค้าจากชีต Product สำหรับตัวเลือก Autocomplete
+                // 2. ดึงรายชื่อสินค้าจากชีต Product
                 const productsResponse = await fetch(`${APPS_SCRIPT_URL}?action=getProducts`);
                 const productsData = await productsResponse.json();
-                state.products = productsData || [];
+                
+                // --- ป้องกันการแสดงผล [object Object] ---
+                if (Array.isArray(productsData)) {
+                    state.products = productsData.map(p => {
+                        if (typeof p === 'object' && p !== null) {
+                            return p.itemName || p.name || p[0] || p[1] || '';
+                        }
+                        return String(p).trim();
+                    }).filter(p => p !== '');
+                } else {
+                    state.products = [];
+                }
 
                 render();
             } catch (error) {
@@ -99,13 +110,11 @@
             }
         }
 
-        // ฟังก์ชันบันทึกข้อมูลไปที่ Sheet
         async function syncDataToSheet() {
-            if (APPS_SCRIPT_URL === 'ใส่_URL_WEB_APP_ของ_คุณที่นี่') return;
+            if (APPS_SCRIPT_URL === 'https://script.google.com/macros/s/AKfycbyMY-9PUXHjLKB0QI-9VQiK0CWnfY8LqYGSkWI_DKAzV1NiBoZcDxu0dv6KDBuNP3toOA/exec' || APPS_SCRIPT_URL.includes('ใส่_URL')) return;
 
             showLoading('กำลังบันทึกข้อมูล...');
             try {
-                // ส่งเป็น text/plain เพื่อเลี่ยงปัญหา CORS Preflight ใน Apps Script
                 await fetch(APPS_SCRIPT_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -120,7 +129,46 @@
         }
 
         // ==========================================
-        // 3. ACTION HANDLERS
+        // 3. AUTOCOMPLETE SEARCH LOGIC
+        // ==========================================
+        function filterProducts(query) {
+            const listDiv = document.getElementById('autocomplete-list');
+            if (!listDiv) return;
+
+            // ถ้าไม่มีคำค้นหา ให้แสดงสินค้า 50 รายการแรก
+            const q = query.toLowerCase().trim();
+            let filtered = [];
+            
+            if (!q) {
+                filtered = state.products.slice(0, 50);
+            } else {
+                filtered = state.products.filter(p => p.toLowerCase().includes(q)).slice(0, 50); // จำกัด 50 รายการเพื่อไม่ให้เครื่องกระตุก
+            }
+
+            if (filtered.length === 0) {
+                listDiv.innerHTML = `<div class="p-4 text-sm text-gray-500 text-center">ไม่พบสินค้าที่ค้นหา</div>`;
+            } else {
+                // สร้างรายการ Dropdown (ใช้ encodeURIComponent ป้องกันชื่อสินค้าที่มีอักขระพิเศษ)
+                listDiv.innerHTML = filtered.map(p => `
+                    <div onclick="selectProduct(decodeURIComponent('${encodeURIComponent(p)}'))" 
+                         class="p-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 text-sm text-gray-800 last:border-0 truncate flex items-center gap-2">
+                        <span class="material-icons-round text-gray-400 text-sm">inventory_2</span> ${p}
+                    </div>
+                `).join('');
+            }
+            listDiv.classList.remove('hidden');
+        }
+
+        function selectProduct(name) {
+            const input = document.getElementById('w1-itemName');
+            if (input) {
+                input.value = name;
+            }
+            document.getElementById('autocomplete-list').classList.add('hidden');
+        }
+
+        // ==========================================
+        // 4. ACTION HANDLERS
         // ==========================================
         function setView(viewName) {
             state.view = viewName;
@@ -161,9 +209,9 @@
 
             state.items.unshift(newItem); 
             state.w1Tab = 'pending'; 
-            render(); // อัปเดต UI ทันที
+            render(); 
             
-            await syncDataToSheet(); // บันทึกฉากหลัง
+            await syncDataToSheet(); 
             alert('ส่งคำขอเบิกสินค้าเรียบร้อยแล้ว!');
         }
 
@@ -200,7 +248,7 @@
         }
 
         // ==========================================
-        // 4. UI RENDERING LOGIC
+        // 5. UI RENDERING LOGIC
         // ==========================================
         function getStatusBadge(status) {
             const styles = {
@@ -284,12 +332,21 @@
                             <span class="material-icons-round text-blue-500">add_circle</span> สร้างรายการเบิกใหม่
                         </h2>
                         
+                        <!-- ช่องค้นหาสินค้าแบบใหม่ -->
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">ชื่อรายการสินค้า *</label>
-                            <input type="text" id="w1-itemName" list="product-list" autocomplete="off" required class="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="พิมพ์เพื่อค้นหา หรือเลือกจากรายการ...">
-                            <datalist id="product-list">
-                                ${state.products.map(product => `<option value="${product}"></option>`).join('')}
-                            </datalist>
+                            <div class="relative">
+                                <input type="text" id="w1-itemName" autocomplete="off" required 
+                                    oninput="filterProducts(this.value)"
+                                    onfocus="filterProducts(this.value)"
+                                    onblur="setTimeout(() => { const el = document.getElementById('autocomplete-list'); if(el) el.classList.add('hidden'); }, 200)"
+                                    class="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                                    placeholder="พิมพ์ค้นหาชื่อสินค้า...">
+                                
+                                <!-- กล่อง Dropdown แสดงผลการค้นหา -->
+                                <div id="autocomplete-list" class="hidden absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto custom-scrollbar">
+                                </div>
+                            </div>
                         </div>
 
                         <div class="grid grid-cols-2 gap-4">
@@ -482,7 +539,7 @@
         }
 
         // ==========================================
-        // 5. INITIALIZATION
+        // 6. INITIALIZATION
         // ==========================================
         window.onload = function() {
             showLoading('กำลังโหลดข้อมูลเบิกจ่าย...');
