@@ -203,7 +203,8 @@
 
             const newItem = {
                 id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
-                timestamp: new Date().toLocaleString('th-TH'),
+                // ปรับให้ล็อก Timezone เป็นเวลาไทย (Asia/Bangkok) เสมอ
+                timestamp: new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }),
                 itemName: itemName,
                 requestQty: parseInt(qty),
                 status: 'สั่งเบิก',
