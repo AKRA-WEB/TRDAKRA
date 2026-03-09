@@ -72,6 +72,25 @@
         // ==========================================
         // 2. API FUNCTIONS (FETCH)
         // ==========================================
+        
+        // ฟังก์ชันแปลงรูปแบบเวลาเป็น วัน-เดือน-ปี / เวลา (ตาม Timezone ประเทศไทย GMT+7)
+        function formatDateTime(dateStr) {
+            if (!dateStr) return '-';
+            const d = new Date(dateStr);
+            // หากรูปแบบเดิมแปลงเป็น Date ไม่ได้ (เป็นตัวหนังสือปกติอยู่แล้ว) ให้แสดงค่าเดิม
+            if (isNaN(d.getTime())) return dateStr;
+
+            const optionsDate = { timeZone: 'Asia/Bangkok', day: '2-digit', month: '2-digit', year: 'numeric' };
+            const optionsTime = { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false };
+            
+            // จะได้ค่าเช่น "03/09/2569" นำมาเปลี่ยน / เป็น -
+            let datePart = d.toLocaleDateString('th-TH', optionsDate).replace(/\//g, '-'); 
+            // จะได้ค่าเช่น "14:52"
+            let timePart = d.toLocaleTimeString('th-TH', optionsTime);
+
+            return `${datePart} / ${timePart} น.`;
+        }
+
         async function fetchInitialData() {
             if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL === 'https://script.google.com/macros/s/AKfycbw-oW1j7jB2oCQLRZ3_k-OKtVKk4xVQHQNlZaZn9IBzHYHlzYONmRaLaj0YD5gZhTz9/exec') {
                 hideLoading();
@@ -83,7 +102,12 @@
                 // 1. ดึงรายการเบิกจ่าย
                 const itemsResponse = await fetch(`${APPS_SCRIPT_URL}?action=getItems`);
                 const itemsData = await itemsResponse.json();
-                state.items = itemsData || [];
+                
+                // แปลงเวลาให้สวยงามก่อนแสดงผลและบันทึก
+                state.items = (itemsData || []).map(item => ({
+                    ...item,
+                    timestamp: formatDateTime(item.timestamp)
+                }));
 
                 // 2. ดึงรายชื่อสินค้าจากชีต Product สำหรับระบบค้นหา
                 const productsResponse = await fetch(`${APPS_SCRIPT_URL}?action=getProducts`);
@@ -203,8 +227,8 @@
 
             const newItem = {
                 id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
-                // ปรับให้ล็อก Timezone เป็นเวลาไทย (Asia/Bangkok) เสมอ
-                timestamp: new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }),
+                // ปรับให้ล็อก Timezone เป็นเวลาไทย (Asia/Bangkok) เสมอ และฟอร์แมตให้อ่านง่าย
+                timestamp: formatDateTime(new Date().toISOString()),
                 itemName: itemName,
                 requestQty: parseInt(qty),
                 status: 'สั่งเบิก',
