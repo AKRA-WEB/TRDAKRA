@@ -140,6 +140,7 @@
             if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL === 'https://script.google.com/macros/s/AKfycbw-oW1j7jB2oCQLRZ3_k-OKtVKk4xVQHQNlZaZn9IBzHYHlzYONmRaLaj0YD5gZhTz9/exec') {
                 hideLoading();
                 alert('คำเตือน: กรุณาใส่ APPS_SCRIPT_URL ในไฟล์ HTML ก่อนใช้งานจริง');
+                render(); // แก้ปัญหาจอขาว: สั่งให้เรนเดอร์หน้าจอแม้จะไม่มี URL
                 return;
             }
 
@@ -170,6 +171,7 @@
             } catch (error) {
                 console.error('Error fetching data:', error);
                 alert('ไม่สามารถเชื่อมต่อกับฐานข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
+                render(); // แก้ปัญหาจอขาว: สั่งให้เรนเดอร์หน้าจอแม้เน็ตหลุด/ดึงข้อมูลพลาด
             } finally {
                 hideLoading();
             }
@@ -686,6 +688,27 @@
             if(currentUser) {
                 showLoading('เตรียมความพร้อม...');
                 fetchInitialData();
+            } else {
+                // แก้ปัญหาจอขาว: หากไม่มีการส่ง ?user= มา ให้แสดงหน้าแจ้งเตือนแทนจอขาว
+                const root = document.getElementById('app-root');
+                root.innerHTML = `
+                    <div class="w-full max-w-sm mx-auto flex flex-col items-center justify-center p-5 relative min-h-screen">
+                        <div class="bg-white p-8 rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] w-full text-center border border-slate-100">
+                            <span class="material-icons-round text-rose-500 text-[56px] mb-4">lock_person</span>
+                            <h2 class="text-xl font-bold text-slate-900 mb-2">เข้าสู่ระบบก่อนใช้งาน</h2>
+                            <p class="text-sm text-slate-500 mb-6 leading-relaxed">แอปพลิเคชันนี้สงวนสิทธิ์เฉพาะพนักงาน<br>กรุณาเข้าสู่ระบบผ่านหน้าระบบหลัก (Main)</p>
+                            
+                            <a href="https://akra-web.github.io/Main/" class="flex justify-center items-center gap-2 w-full bg-slate-900 text-white py-4 rounded-2xl font-medium hover:bg-slate-800 transition-all shadow-md active:scale-[0.98]">
+                                กลับไปหน้าระบบหลัก
+                            </a>
+                            
+                            <!-- ปุ่มสำหรับเทสระบบ (ถ้าใช้จริงจะลบออกก็ได้ครับ) -->
+                            <button onclick="window.location.href='?user=ทดสอบระบบ'" class="mt-3 w-full bg-slate-50 text-slate-600 py-3.5 rounded-2xl font-medium text-sm hover:bg-slate-100 transition-colors">
+                                เข้าสู่โหมดทดสอบ
+                            </button>
+                        </div>
+                    </div>
+                `;
             }
         };
 
