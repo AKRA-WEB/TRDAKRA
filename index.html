@@ -58,32 +58,33 @@
         // ==========================================
         // 0. AUTHENTICATION & LOG SYSTEM (จากหน้า Main)
         // ==========================================
+        // 1. ตั้งค่าชื่อแอปพลิเคชันนี้
         const CURRENT_APP_NAME = "TRDAKRA"; 
+        
+        // URL ของ Google Apps Script (ตัวเดียวกับหน้า Main สำหรับบันทึก Log)
         const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
+        // 2. ดึงชื่อผู้ใช้จาก URL (ที่หน้า Main ส่งมาให้)
         const urlParams = new URLSearchParams(window.location.search);
         let currentUser = urlParams.get('user');
 
         if (currentUser) {
             sessionStorage.setItem('active_user', currentUser);
-            try {
-                // Check if running in iframe (like in Canvas) to prevent replaceState error
-                if (window.self === window.top) {
-                    window.history.replaceState({}, document.title, window.location.pathname);
-                }
-            } catch(e) {
-                console.warn('Cannot update URL history:', e);
-            }
+            window.history.replaceState({}, document.title, window.location.pathname);
         } else {
             currentUser = sessionStorage.getItem('active_user');
         }
 
-        if (currentUser) {
+        // 3. ระบบรักษาความปลอดภัย: ถ้าไม่มีชื่อผู้ใช้เลย แปลว่าแอบเข้าลิงก์ตรงๆ ไม่ผ่านหน้า Main
+        if (!currentUser) {
+            alert("กรุณาเข้าสู่ระบบผ่านหน้า Main ก่อนใช้งานครับ");
+            window.location.href = "https://akra-web.github.io/Main/"; 
+        } else {
             console.log("ยินดีต้อนรับคุณ: " + currentUser);
         }
 
+        // 4. ฟังก์ชันสำหรับบันทึก Log การทำงานในแอปนี้
         function sendAppLog(action, details) {
-            if (!currentUser) return;
             const payload = {
                 user: currentUser,
                 action: action,
@@ -729,14 +730,6 @@
             `;
         }
 
-        // ฟังก์ชันเข้าสู่โหมดทดสอบ (สำหรับรันในหน้า Preview โดยไม่ต้องใช้ URL)
-        function enterTestMode() {
-            currentUser = 'Admin';
-            sessionStorage.setItem('active_user', currentUser);
-            showLoading('เตรียมความพร้อม...');
-            fetchInitialData();
-        }
-
         // Main Render Function
         function render() {
             const root = document.getElementById('app-root');
@@ -765,11 +758,11 @@
                             <h2 class="text-lg font-bold text-slate-900 mb-2">เข้าสู่ระบบก่อนใช้งาน</h2>
                             <p class="text-xs text-slate-500 mb-6 leading-relaxed">แอปพลิเคชันนี้สงวนสิทธิ์เฉพาะผู้ใช้ในระบบ<br>กรุณาเข้าสู่ระบบผ่านหน้าระบบหลัก</p>
                             
-                            <a href="https://akra-web.github.io/Main/" target="_top" class="flex justify-center items-center gap-2 w-full bg-slate-900 text-white py-4 rounded-2xl font-medium text-sm hover:bg-slate-800 transition-all shadow-[0_4px_14px_rgba(0,0,0,0.15)] active:scale-[0.98]">
+                            <a href="https://akra-web.github.io/Main/" class="flex justify-center items-center gap-2 w-full bg-slate-900 text-white py-4 rounded-2xl font-medium text-sm hover:bg-slate-800 transition-all shadow-[0_4px_14px_rgba(0,0,0,0.15)] active:scale-[0.98]">
                                 กลับไปหน้าระบบหลัก
                             </a>
                             
-                            <button onclick="enterTestMode()" class="mt-4 w-full bg-transparent text-slate-400 py-3 rounded-2xl font-medium text-[11px] tracking-wide hover:bg-slate-50 transition-colors cursor-pointer z-50">
+                            <button onclick="window.location.href='?user=Admin'" class="mt-4 w-full bg-transparent text-slate-400 py-3 rounded-2xl font-medium text-[11px] tracking-wide hover:bg-slate-50 transition-colors">
                                 ข้ามไปโหมดทดสอบ
                             </button>
                         </div>
