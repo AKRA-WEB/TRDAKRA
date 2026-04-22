@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ระบบเบิกจ่ายสินค้า W1-W2</title>
+    <title>ระบบเบิกจ่ายสินค้า TRD-AKRA</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Google Material Icons -->
@@ -58,50 +58,28 @@
         // ==========================================
         // 0. AUTHENTICATION & LOG SYSTEM (จากหน้า Main)
         // ==========================================
-        // 1. ตั้งค่าชื่อแอปพลิเคชันนี้
         const CURRENT_APP_NAME = "TRDAKRA"; 
-        
-        // URL ของ Google Apps Script (ตัวเดียวกับหน้า Main สำหรับบันทึก Log)
-        const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
+        const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
-        // 2. ดึงชื่อผู้ใช้จาก URL (ที่หน้า Main ส่งมาให้)
         const urlParams = new URLSearchParams(window.location.search);
         let currentUser = urlParams.get('user');
 
         if (currentUser) {
-            // ถ้ามีชื่อส่งมา ให้จำค่าไว้ใน sessionStorage (เผื่อผู้ใช้กด Refresh หน้าเว็บ จะได้ไม่หลุด)
             sessionStorage.setItem('active_user', currentUser);
-            
-            // ลบ ?user=... ออกจาก URL เพื่อให้ URL ดูสะอาดตา (Optional)
-            try {
-                window.history.replaceState({}, document.title, window.location.pathname);
-            } catch(e) {
-                // ป้องกัน Error เวลาแก้ไข URL ในโหมด Preview
-            }
+            try { window.history.replaceState({}, document.title, window.location.pathname); } catch(e) {}
         } else {
-            // ถ้าไม่มีใน URL ให้ลองหาในสิ่งที่จำไว้
             currentUser = sessionStorage.getItem('active_user');
         }
 
-        // 3. ระบบรักษาความปลอดภัย: ถ้าไม่มีชื่อผู้ใช้เลย แปลว่าแอบเข้าลิงก์ตรงๆ ไม่ผ่านหน้า Main
         if (!currentUser) {
-            // ดักจับ: หากเปิดในหน้าต่าง Preview ให้สร้างชื่อจำลองอัตโนมัติ เพื่อให้ดูแอปได้เลย
-            if (window.self !== window.top || window.location.hostname.includes('usercontent')) {
+            if (window.self !== window.top || window.location.hostname.includes('usercontent') || window.location.hostname.includes('127.0.0.1')) {
                 currentUser = "พนักงาน (Preview)";
             } else {
                 alert("กรุณาเข้าสู่ระบบผ่านหน้า Main ก่อนใช้งานครับ");
-                // เด้งกลับไปหน้า Main ทันที
-                try {
-                    window.location.href = "https://akra-web.github.io/Main/"; 
-                } catch(e) {}
+                try { window.location.href = "https://akra-web.github.io/Main/"; } catch(e) {}
             }
         } 
         
-        if (currentUser) {
-            console.log("ยินดีต้อนรับคุณ: " + currentUser);
-        }
-
-        // 4. ฟังก์ชันสำหรับบันทึก Log การทำงานในแอปนี้
         function sendAppLog(action, details) {
             const payload = {
                 user: currentUser,
@@ -110,29 +88,28 @@
                 details: details
             };
 
-            fetch(GOOGLE_APP_SCRIPT_URL, {
+            fetch(GOOGLE_APP_SCRIPT_URL_LOG, {
                 method: 'POST',
                 mode: 'no-cors',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             }).then(() => {
-                console.log(`บันทึก Log สำเร็จ: ${action} โดย ${currentUser}`);
+                console.log(`บันทึก Log สำเร็จ: ${action}`);
             }).catch(err => console.error(err));
         }
 
         // ==========================================
         // 1. CONFIGURATION & STATE (ระบบเบิกจ่าย)
         // ==========================================
-        // URL ของ Web App สำหรับดึงและบันทึกข้อมูลเบิกจ่าย
         const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby_VL9BXR4JOPvrvWtEoKWyM_FlN5SeNdiZhYpUoeAcC7K2_aSzDJ4RlxPgd-e8RpP4Aw/exec';
 
         let state = {
-            view: 'home', // 'home', 'w1', 'w2'
-            w1Tab: 'request', // 'request', 'pending', 'history'
-            w2Tab: 'tasks', // 'tasks', 'history'
-            selectedReceiveId: null, 
-            items: [], // รายการเบิกสินค้า
-            products: [] // รายชื่อสินค้าจากชีต Product
+            view: 'home', 
+            w1Tab: 'request', 
+            w2Tab: 'tasks', 
+            selectedReceiveId: null, // ใช้สำหรับเปิด/ปิดฟอร์มของฝั่ง AKRA
+            items: [], 
+            products: [] 
         };
 
         function showLoading(text = 'กำลังทำงาน...') {
@@ -161,7 +138,6 @@
             return `${datePart} / ${timePart} น.`;
         }
 
-        // ฟังก์ชันแปลงวันที่ที่ผู้ใช้พิมพ์ (พ.ศ.) ให้กลายเป็น ค.ศ. ก่อนส่งไปหลังบ้าน
         function convertToCE(dateStr) {
             if (!dateStr) return dateStr;
             const regex = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/;
@@ -170,16 +146,12 @@
                 let day = match[1].padStart(2, '0');
                 let month = match[2].padStart(2, '0');
                 let year = parseInt(match[3], 10);
-
-                if (year > 2500) { 
-                    year -= 543;
-                }
+                if (year > 2500) year -= 543;
                 return `${day}-${month}-${year}`; 
             }
             return dateStr; 
         }
 
-        // ฟังก์ชันป้องกันกรณี Google Sheet แอบแปลงวันที่เป็นรูปแบบสากล (ISO) ให้ออกมาเป็น วัน-เดือน-ปี ตามเดิม
         function formatExpiryDate(val) {
             if (!val || val === 'ไม่ได้ระบุ') return val;
             
@@ -200,24 +172,24 @@
                     let day = match[1].padStart(2, '0');
                     let month = match[2].padStart(2, '0');
                     let year = parseInt(match[3], 10);
-                    if (year > 1900 && year < 2500) { 
-                        year += 543;
-                    }
+                    if (year > 1900 && year < 2500) year += 543;
                     return `${day}-${month}-${year}`;
                 }
             }
-            
             return val;
         }
 
-        async function fetchInitialData() {
-            if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL === 'https://script.google.com/macros/s/AKfycbw-oW1j7jB2oCQLRZ3_k-OKtVKk4xVQHQNlZaZn9IBzHYHlzYONmRaLaj0YD5gZhTz9/exec') {
+        async function fetchInitialData(isRefresh = false) {
+            if (!APPS_SCRIPT_URL) {
                 hideLoading();
                 alert('คำเตือน: กรุณาใส่ APPS_SCRIPT_URL ในไฟล์ HTML ก่อนใช้งานจริง');
                 return;
             }
 
+            if(isRefresh) showLoading('กำลังรีเฟรชข้อมูล...');
+
             try {
+                // Fetch Items
                 const itemsResponse = await fetch(`${APPS_SCRIPT_URL}?action=getItems`);
                 const itemsData = await itemsResponse.json();
                 
@@ -228,6 +200,7 @@
                     newExpiry: formatExpiryDate(item.newExpiry)
                 }));
 
+                // Fetch Products
                 const productsResponse = await fetch(`${APPS_SCRIPT_URL}?action=getProducts`);
                 const productsData = await productsResponse.json();
                 
@@ -252,7 +225,7 @@
         }
 
         async function syncDataToSheet() {
-            if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL === 'https://script.google.com/macros/s/AKfycbx3wED0Kurg2OhIXcflXwAxHz5_BAMmICk3I6Q43S-wzU5gNznafymrQj9mNbYH6AnA/exec') return;
+            if (!APPS_SCRIPT_URL) return;
 
             showLoading('กำลังบันทึกข้อมูล...');
             try {
@@ -332,6 +305,7 @@
 
         function setW2Tab(tabName) {
             state.w2Tab = tabName;
+            state.selectedReceiveId = null;
             render();
         }
 
@@ -362,9 +336,7 @@
             
             await syncDataToSheet(); 
             alert('ส่งคำขอเบิกสินค้าเรียบร้อยแล้ว!');
-            
-            // ส่ง Log การทำรายการ
-            sendAppLog("สั่งเบิกสินค้า", `เบิก: ${itemName} จำนวน ${qty} ชิ้น`);
+            sendAppLog("สั่งเบิกสินค้า (TRD)", `เบิก: ${itemName} จำนวน ${qty} ชิ้น`);
         }
 
         function openReceiveForm(id) {
@@ -372,23 +344,27 @@
             render();
         }
 
-        async function handleReceiveSubmit(event, id, reqQty) {
+        // เปลี่ยนฟังก์ชันให้เป็น AKRA เป็นคนกดยืนยันจัดส่ง
+        async function handleDispatchSubmit(event, id, reqQty) {
             event.preventDefault();
-            const receiveQty = parseInt(document.getElementById(`recv-qty-${id}`).value);
-            const newExpiryInput = document.getElementById(`recv-exp-${id}`).value;
+            const dispatchQty = parseInt(document.getElementById(`disp-qty-${id}`).value);
+            const newExpiryInput = document.getElementById(`disp-exp-${id}`).value;
+            const noteInput = document.getElementById(`w2-note-${id}`);
+            const w2NoteValue = noteInput ? noteInput.value : '';
             
             const newExpiry = newExpiryInput ? convertToCE(newExpiryInput) : 'ไม่ได้ระบุ';
 
             let note = 'ครบ';
-            if (receiveQty < reqQty) note = `ขาด ${reqQty - receiveQty}`;
-            if (receiveQty > reqQty) note = `เกิน ${receiveQty - reqQty}`;
+            if (dispatchQty < reqQty) note = `ขาด ${reqQty - dispatchQty}`;
+            if (dispatchQty > reqQty) note = `เกิน ${dispatchQty - reqQty}`;
 
-            let receivedItemName = "";
+            let dispatchedItemName = "";
 
             state.items = state.items.map(item => {
                 if (item.id === id) {
-                    receivedItemName = item.itemName;
-                    return { ...item, status: 'รับสินค้าแล้ว', receiveQty: receiveQty, receiveNote: note, newExpiry: newExpiry };
+                    dispatchedItemName = item.itemName;
+                    // อัปเดตสถานะเป็น "จัดส่งแล้ว" ไปเลย
+                    return { ...item, status: 'จัดส่งแล้ว', receiveQty: dispatchQty, receiveNote: note, newExpiry: newExpiry, w2Note: w2NoteValue || item.w2Note };
                 }
                 return item;
             });
@@ -396,9 +372,7 @@
             state.selectedReceiveId = null;
             render();
             await syncDataToSheet();
-            
-            // ส่ง Log การรับสินค้า
-            sendAppLog("รับสินค้า", `รับ: ${receivedItemName} ยอดจริง ${receiveQty} (${note})`);
+            sendAppLog("จัดส่งสินค้า (AKRA)", `จัดส่ง: ${dispatchedItemName} ยอด ${dispatchQty} (${note})`);
         }
 
         async function updateItemStatus(id, newStatus) {
@@ -415,20 +389,17 @@
             });
             render();
             await syncDataToSheet();
-            
-            // ส่ง Log การอัปเดตสถานะของคลัง
-            sendAppLog("เปลี่ยนสถานะคลัง", `สถานะ: ${newStatus} (${targetItemName}) หมายเหตุ: ${w2NoteValue}`);
+            sendAppLog("เปลี่ยนสถานะ (AKRA)", `สถานะ: ${newStatus} (${targetItemName}) หมายเหตุ: ${w2NoteValue}`);
         }
 
         // ==========================================
-        // 5. UI RENDERING LOGIC (Colorful Minimalist)
+        // 5. UI RENDERING LOGIC
         // ==========================================
         function getStatusBadge(status) {
             const styles = {
                 'สั่งเบิก': 'bg-blue-50 text-blue-700 border-blue-200/60',
                 'กำลังจัดสินค้า': 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/30',
-                'รอรับสินค้า': 'bg-orange-50 text-orange-600 border-orange-200/60 animate-pulse',
-                'รับสินค้าแล้ว': 'bg-emerald-50 text-emerald-700 border-emerald-200/60',
+                'จัดส่งแล้ว': 'bg-emerald-50 text-emerald-700 border-emerald-200/60', // ปรับจาก รับสินค้าแล้ว
                 'สินค้าหมด': 'bg-rose-50 text-rose-700 border-rose-200/60',
                 'ยกเลิกรายการ': 'bg-slate-50 text-slate-400 border-slate-200'
             };
@@ -447,7 +418,7 @@
         }
 
         function renderHistoryList(role) {
-            const historyItems = state.items.filter(i => ['รับสินค้าแล้ว', 'สินค้าหมด', 'ยกเลิกรายการ'].includes(i.status));
+            const historyItems = state.items.filter(i => ['จัดส่งแล้ว', 'สินค้าหมด', 'ยกเลิกรายการ'].includes(i.status));
             if (historyItems.length === 0) return renderEmptyState('ไม่มีประวัติย้อนหลัง', 'history_toggle_off');
 
             return `
@@ -465,14 +436,14 @@
                             <div class="flex justify-between items-end border-t border-slate-50 pt-3 mt-1">
                                 <div class="text-xs text-slate-500 space-y-1">
                                     <p class="text-[10px] text-slate-400 flex items-center gap-1"><span class="material-icons-round text-[12px]">schedule</span> ${item.timestamp}</p>
-                                    ${item.status === 'รับสินค้าแล้ว' ? `
-                                        <p class="mt-1">เบิก <span class="font-medium text-slate-700">${item.requestQty}</span> • รับจริง <span class="font-medium text-emerald-600">${item.receiveQty}</span></p>
+                                    ${item.status === 'จัดส่งแล้ว' ? `
+                                        <p class="mt-1">เบิก <span class="font-medium text-slate-700">${item.requestQty}</span> • ส่งจริง <span class="font-medium text-emerald-600">${item.receiveQty}</span></p>
                                         ${role === 'w1' ? `<p class="text-[11px] text-blue-500 font-medium">EXP ใหม่: ${item.newExpiry}</p>` : ''}
                                     ` : ''}
                                 </div>
                                 
-                                ${item.status === 'รับสินค้าแล้ว' && item.receiveNote && item.receiveNote !== 'ครบ' ? `
-                                    <div class="text-[10px] font-medium text-rose-500 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-100/50">ได้${item.receiveNote}</div>
+                                ${item.status === 'จัดส่งแล้ว' && item.receiveNote && item.receiveNote !== 'ครบ' ? `
+                                    <div class="text-[10px] font-medium text-rose-500 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-100/50">จัดส่ง${item.receiveNote}</div>
                                 ` : ''}
                             </div>
                             ${item.w2Note ? `<p class="text-[11px] mt-3 text-amber-700 bg-amber-50 px-3 py-2 rounded-xl border border-amber-100/50"><span class="font-bold">โน้ต:</span> ${item.w2Note}</p>` : ''}
@@ -493,18 +464,18 @@
 
                     <div class="bg-white p-10 rounded-[2.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.06)] w-full text-center border border-slate-50 mt-10">
                         <div class="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 bg-blue-50 text-blue-600 shadow-inner">
-                            <span class="material-icons-round" style="font-size: 36px;">inventory_2</span>
+                            <span class="material-icons-round" style="font-size: 36px;">local_shipping</span>
                         </div>
-                        <h1 class="text-2xl font-bold text-slate-800 mb-2">ระบบเบิกจ่ายสินค้า</h1>
+                        <h1 class="text-2xl font-bold text-slate-800 mb-2">ระบบเบิกย้ายสินค้า</h1>
                         <p class="text-slate-400 mb-10 text-xs tracking-wide">เลือกระบบที่คุณต้องการเข้าใช้งาน</p>
                         
                         <div class="space-y-4">
                             <button onclick="setView('w1')" class="w-full bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-2xl font-medium flex items-center justify-center gap-3 transition-all shadow-[0_6px_20px_rgba(37,99,235,0.25)] active:scale-[0.98]">
-                                <span class="material-icons-round text-blue-200">storefront</span> พนักงานหน้าร้าน (W1)
+                                <span class="material-icons-round text-blue-200">storefront</span> TRD (หน้าร้าน)
                             </button>
                             
                             <button onclick="setView('w2')" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white p-4 rounded-2xl font-medium flex items-center justify-center gap-3 transition-all shadow-[0_6px_20px_rgba(79,70,229,0.25)] active:scale-[0.98]">
-                                <span class="material-icons-round text-indigo-200">warehouse</span> พนักงานคลังสินค้า (W2)
+                                <span class="material-icons-round text-indigo-200">warehouse</span> AKRA (คลังสินค้า)
                             </button>
                         </div>
                     </div>
@@ -513,8 +484,6 @@
         }
 
         function renderW1() {
-            const hasPending = state.items.some(i => i.status === 'รอรับสินค้า');
-            
             let content = '';
             if (state.w1Tab === 'request') {
                 content = `
@@ -523,7 +492,7 @@
                             <div class="bg-blue-50 text-blue-600 p-1.5 rounded-full flex items-center justify-center">
                                 <span class="material-icons-round text-[20px]">add</span>
                             </div>
-                            สร้างรายการเบิก
+                            สร้างรายการเบิก (TRD)
                         </h2>
                         
                         <div>
@@ -558,7 +527,7 @@
                     </form>
                 `;
             } else if (state.w1Tab === 'pending') {
-                const pendingItems = state.items.filter(i => ['สั่งเบิก', 'กำลังจัดสินค้า', 'รอรับสินค้า'].includes(i.status));
+                const pendingItems = state.items.filter(i => ['สั่งเบิก', 'กำลังจัดสินค้า'].includes(i.status));
                 if (pendingItems.length === 0) {
                     content = renderEmptyState('ไม่มีรายการรอรับ', 'check_circle_outline');
                 } else {
@@ -593,33 +562,6 @@
                                     </button>
                                 </div>
                             ` : ''}
-
-                            ${item.status === 'รอรับสินค้า' && state.selectedReceiveId !== item.id ? `
-                                <button onclick="openReceiveForm('${item.id}')" class="w-full bg-emerald-500 text-white font-medium text-sm py-3.5 rounded-xl hover:bg-emerald-600 active:scale-[0.98] transition-all shadow-[0_4px_12px_rgba(16,185,129,0.2)]">
-                                    เช็คและรับสินค้า
-                                </button>
-                            ` : ''}
-
-                            ${state.selectedReceiveId === item.id ? `
-                                <form onsubmit="handleReceiveSubmit(event, '${item.id}', ${item.requestQty})" class="mt-2 pt-4 border-t border-slate-100 animate-fade-in">
-                                    <h4 class="font-bold text-emerald-700 text-sm mb-4 flex items-center justify-center gap-2"><span class="material-icons-round text-[18px]">verified</span> ฟอร์มตรวจรับ</h4>
-                                    <div class="space-y-4">
-                                        <div>
-                                            <label class="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">รับจริง (ชิ้น)</label>
-                                            <input type="number" id="recv-qty-${item.id}" required min="0" value="${item.requestQty}" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-center text-lg font-bold text-emerald-700 transition-all">
-                                            <p class="text-[10px] text-slate-400 mt-1 ml-1">* หากได้ไม่ตรงยอด ระบบจะบันทึกหมายเหตุให้อัตโนมัติ</p>
-                                        </div>
-                                        <div>
-                                            <label class="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">วันหมดอายุใหม่ <span class="text-rose-500">*</span></label>
-                                            <input type="text" id="recv-exp-${item.id}" required class="w-full p-3.5 bg-slate-50 border border-transparent rounded-xl focus:bg-white focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50 text-sm transition-all" placeholder="วว-ดด-ปป">
-                                        </div>
-                                        <div class="flex gap-3 pt-2">
-                                            <button type="button" onclick="openReceiveForm(null)" class="flex-1 bg-white border border-slate-200 text-slate-500 py-3.5 rounded-xl font-medium text-sm transition-colors hover:bg-slate-50">ยกเลิก</button>
-                                            <button type="submit" class="flex-[2] bg-emerald-600 text-white py-3.5 rounded-xl font-medium text-sm shadow-[0_4px_12px_rgba(5,150,105,0.2)] active:scale-[0.98] transition-all">ยืนยันรับของ</button>
-                                        </div>
-                                    </div>
-                                </form>
-                            ` : ''}
                         </div>
                     `).join('') + `</div>`;
                 }
@@ -635,21 +577,23 @@
                             <button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-blue-700 transition-colors text-white">
                                 <span class="material-icons-round">arrow_back</span>
                             </button>
-                            <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">storefront</span> หน้าร้าน W1</h1>
+                            <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">storefront</span> TRD (หน้าร้าน)</h1>
                         </div>
-                        <div class="text-[10px] font-semibold tracking-wide bg-blue-700/50 text-blue-50 px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-blue-500/30">
-                            <span class="material-icons-round text-[14px]">account_circle</span>
-                            ${currentUser || 'Demo'}
+                        <div class="flex items-center gap-2">
+                            <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-blue-700 transition-colors text-white" title="รีเฟรชข้อมูล">
+                                <span class="material-icons-round text-[20px]">refresh</span>
+                            </button>
+                            <div class="text-[10px] font-semibold tracking-wide bg-blue-700/50 text-blue-50 px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-blue-500/30">
+                                <span class="material-icons-round text-[14px]">account_circle</span>
+                                ${currentUser || 'Demo'}
+                            </div>
                         </div>
                     </header>
 
                     <!-- Tabs -->
                     <div class="flex bg-white shadow-sm sticky top-[60px] z-10 border-b border-slate-100 px-2">
                         <button onclick="setW1Tab('request')" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] transition-all ${state.w1Tab === 'request' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'}">เบิกสินค้า</button>
-                        <button onclick="setW1Tab('pending')" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] relative transition-all ${state.w1Tab === 'pending' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'}">
-                            รอรับ
-                            ${hasPending ? `<span class="absolute top-3.5 right-4 w-1.5 h-1.5 rounded-full bg-rose-500 ring-2 ring-white"></span>` : ''}
-                        </button>
+                        <button onclick="setW1Tab('pending')" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] relative transition-all ${state.w1Tab === 'pending' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'}">รอรับ</button>
                         <button onclick="setW1Tab('history')" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] transition-all ${state.w1Tab === 'history' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'}">ประวัติ</button>
                     </div>
 
@@ -696,17 +640,35 @@
                                 <input type="text" id="w2-note-${item.id}" value="${item.w2Note || ''}" class="w-full p-3.5 bg-slate-50 border border-transparent rounded-xl focus:bg-white focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50 transition-all text-sm text-slate-800 placeholder:text-slate-300" placeholder="เช่น ของได้แค่ 5 ชิ้น...">
                             </div>
 
-                            ${['สั่งเบิก', 'กำลังจัดสินค้า'].includes(item.status) ? `
+                            ${state.selectedReceiveId !== item.id ? `
                                 <div class="flex flex-col gap-2">
-                                    <button onclick="updateItemStatus('${item.id}', 'รอรับสินค้า')" class="w-full py-4 bg-slate-900 text-white font-medium rounded-xl shadow-[0_4px_12px_rgba(0,0,0,0.1)] flex justify-center items-center gap-2 text-sm active:scale-[0.98] transition-all">
-                                        ส่งไปหน้าร้าน <span class="material-icons-round text-[18px]">east</span>
+                                    <button onclick="openReceiveForm('${item.id}')" class="w-full py-4 bg-emerald-600 text-white font-medium rounded-xl shadow-[0_4px_12px_rgba(16,185,129,0.2)] flex justify-center items-center gap-2 text-sm active:scale-[0.98] transition-all hover:bg-emerald-700">
+                                        จัดส่งสินค้า <span class="material-icons-round text-[18px]">local_shipping</span>
                                     </button>
                                     <div class="flex gap-2 mt-1">
                                         <button onclick="if(confirm('ยืนยันแจ้งสินค้าหมด?')) updateItemStatus('${item.id}', 'สินค้าหมด')" class="flex-1 py-2 text-[11px] font-semibold tracking-wide text-rose-500 hover:bg-rose-50 rounded-lg transition-colors">แจ้งของหมด</button>
                                         <button onclick="if(confirm('ต้องการยกเลิกรายการนี้?')) updateItemStatus('${item.id}', 'ยกเลิกรายการ')" class="flex-1 py-2 text-[11px] font-semibold tracking-wide text-slate-400 hover:bg-slate-100 rounded-lg transition-colors">ยกเลิกรายการ</button>
                                     </div>
                                 </div>
-                            ` : ''}
+                            ` : `
+                                <form onsubmit="handleDispatchSubmit(event, '${item.id}', ${item.requestQty})" class="mt-4 pt-4 border-t border-slate-100 animate-fade-in">
+                                    <h4 class="font-bold text-emerald-700 text-sm mb-4 flex items-center justify-center gap-2"><span class="material-icons-round text-[18px]">inventory</span> ฟอร์มยืนยันการจัดส่ง</h4>
+                                    <div class="space-y-4">
+                                        <div>
+                                            <label class="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">ยอดจัดส่งจริง (ชิ้น)</label>
+                                            <input type="number" id="disp-qty-${item.id}" required min="0" value="${item.requestQty}" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-center text-lg font-bold text-emerald-700 transition-all">
+                                        </div>
+                                        <div>
+                                            <label class="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">วันหมดอายุใหม่</label>
+                                            <input type="text" id="disp-exp-${item.id}" class="w-full p-3.5 bg-slate-50 border border-transparent rounded-xl focus:bg-white focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50 text-sm transition-all" placeholder="วว-ดด-ปป (ถ้ามี)">
+                                        </div>
+                                        <div class="flex gap-3 pt-2">
+                                            <button type="button" onclick="openReceiveForm(null)" class="flex-1 bg-white border border-slate-200 text-slate-500 py-3.5 rounded-xl font-medium text-sm transition-colors hover:bg-slate-50">ยกเลิก</button>
+                                            <button type="submit" class="flex-[2] bg-emerald-600 text-white py-3.5 rounded-xl font-medium text-sm shadow-[0_4px_12px_rgba(5,150,105,0.2)] active:scale-[0.98] transition-all">ยืนยันการส่ง</button>
+                                        </div>
+                                    </div>
+                                </form>
+                            `}
                         </div>
                     `).join('') + `</div>`;
                 }
@@ -722,11 +684,16 @@
                             <button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-indigo-700 transition-colors text-white">
                                 <span class="material-icons-round">arrow_back</span>
                             </button>
-                            <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">warehouse</span> คลังสินค้า W2</h1>
+                            <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">warehouse</span> AKRA (คลังสินค้า)</h1>
                         </div>
-                        <div class="text-[10px] font-semibold tracking-wide bg-indigo-700/50 text-indigo-50 px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-indigo-500/30">
-                            <span class="material-icons-round text-[14px]">account_circle</span>
-                            ${currentUser || 'Demo'}
+                        <div class="flex items-center gap-2">
+                            <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-indigo-700 transition-colors text-white" title="รีเฟรชข้อมูล">
+                                <span class="material-icons-round text-[20px]">refresh</span>
+                            </button>
+                            <div class="text-[10px] font-semibold tracking-wide bg-indigo-700/50 text-indigo-50 px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-indigo-500/30">
+                                <span class="material-icons-round text-[14px]">account_circle</span>
+                                ${currentUser || 'Demo'}
+                            </div>
                         </div>
                     </header>
 
@@ -763,7 +730,6 @@
         // 6. INITIALIZATION
         // ==========================================
         window.onload = function() {
-            // โค้ดสำหรับดักจับว่ามีผู้ใช้เข้าระบบหรือยัง จะทำงานจากด้านบน (บรรทัดที่ 46) อยู่แล้ว
             if(currentUser) {
                 showLoading('กำลังโหลดข้อมูลเบิกจ่าย...');
                 fetchInitialData();
