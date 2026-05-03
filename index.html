@@ -70,30 +70,97 @@
 
     <script>
         // ==========================================
-        // 0. AUTHENTICATION & LOG SYSTEM
+        // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
-        const CURRENT_APP_NAME = "TRDAKRA"; 
+        const CURRENT_APP_NAME = "TRDAKRA";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
-        const urlParams = new URLSearchParams(window.location.search);
-        let currentUser = urlParams.get('user');
+        const SSO_CONFIG = {
+            PORTAL_URL:     "https://akra-web.github.io/Main/",
+            API_URL:        "https://script.google.com/macros/s/AKfycbxSomEq-O49vgID_6P-3XfoGuM86rM0dWPQS-ZMsFDvF-_N-O3EkaOS1Cdgg8nkxNfe/exec",
+            STORAGE_KEY:    "akra_trdakra_session",
+            REQUIRED_ROLES: []  // [] = ทุก Role เข้าได้ | ระบุเช่น ["ADMIN","TRD"] เพื่อจำกัดสิทธิ์
+        };
 
-        if (currentUser) {
-            sessionStorage.setItem('active_user', currentUser);
-            try { window.history.replaceState({}, document.title, window.location.pathname); } catch(e) {}
-        } else {
-            currentUser = sessionStorage.getItem('active_user');
+        let currentUser = null;
+
+        // UI helpers สำหรับแสดง error และ redirect
+        function ssoShowError(message) {
+            document.getElementById('loading-overlay').style.display = 'none';
+            alert(message);
+            setTimeout(() => { window.location.replace(SSO_CONFIG.PORTAL_URL); }, 500);
         }
 
-        if (!currentUser) {
-            if (window.self !== window.top || window.location.hostname.includes('usercontent') || window.location.hostname.includes('127.0.0.1')) {
-                currentUser = "พนักงาน (Preview)";
+        // ฟังก์ชัน verify token + init app — เรียกใน window.onload
+        async function ssoInit() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const ssoToken  = urlParams.get('sso');
+
+            if (ssoToken) {
+                // ===== มี Token จาก Main Menu — verify กับ Server =====
+                try { window.history.replaceState({}, document.title, window.location.pathname); } catch(e) {}
+
+                try {
+                    const rolesParam = SSO_CONFIG.REQUIRED_ROLES.length
+                        ? '&roles=' + SSO_CONFIG.REQUIRED_ROLES.join(',')
+                        : '';
+                    const res    = await fetch(`${SSO_CONFIG.API_URL}?action=verifyToken&token=${encodeURIComponent(ssoToken)}${rolesParam}`);
+                    const result = await res.json();
+
+                    if (!result.valid) {
+                        const errorMsg = {
+                            token_expired:    'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่',
+                            user_not_found:   'ไม่พบข้อมูลผู้ใช้ในระบบ',
+                            permission_denied:'คุณไม่มีสิทธิ์เข้าใช้งานระบบนี้',
+                            invalid_token:    'ไม่สามารถยืนยันตัวตนได้ กรุณาเข้าสู่ระบบใหม่'
+                        };
+                        localStorage.removeItem(SSO_CONFIG.STORAGE_KEY);
+                        ssoShowError(errorMsg[result.reason] || 'เกิดข้อผิดพลาดในการยืนยันตัวตน');
+                        return;
+                    }
+
+                    // Token ผ่าน — บันทึก session ไว้ใช้ตอน refresh หน้า
+                    localStorage.setItem(SSO_CONFIG.STORAGE_KEY, JSON.stringify({
+                        name:  result.user.name,
+                        id:    result.user.id,
+                        roles: result.user.roles
+                    }));
+                    currentUser = result.user.name;
+
+                } catch(e) {
+                    ssoShowError('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์เพื่อตรวจสอบสิทธิ์ได้');
+                    return;
+                }
+
             } else {
-                alert("กรุณาเข้าสู่ระบบผ่านหน้า Main ก่อนใช้งานครับ");
-                try { window.location.href = "https://akra-web.github.io/Main/"; } catch(e) {}
+                // ===== ไม่มี Token — อ่าน session เดิม (กรณี refresh หน้า) =====
+                const cached = localStorage.getItem(SSO_CONFIG.STORAGE_KEY);
+                if (!cached) {
+                    ssoShowError('กรุณาเข้าสู่ระบบผ่านหน้า Portal ก่อนใช้งาน');
+                    return;
+                }
+                try {
+                    const session = JSON.parse(cached);
+                    const hasPermission = SSO_CONFIG.REQUIRED_ROLES.length === 0 ||
+                        session.roles.some(r => SSO_CONFIG.REQUIRED_ROLES.includes(r));
+                    if (!hasPermission) {
+                        localStorage.removeItem(SSO_CONFIG.STORAGE_KEY);
+                        ssoShowError('คุณไม่มีสิทธิ์เข้าใช้งานระบบนี้');
+                        return;
+                    }
+                    currentUser = session.name;
+                } catch(e) {
+                    localStorage.removeItem(SSO_CONFIG.STORAGE_KEY);
+                    ssoShowError('Session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่');
+                    return;
+                }
             }
-        } 
-        
+
+            // Auth ผ่าน — โหลดแอพ
+            showLoading('กำลังโหลดข้อมูลเบิกจ่าย...');
+            fetchInitialData();
+        }
+
         function sendAppLog(action, details) {
             const payload = { user: currentUser, action: action, app: CURRENT_APP_NAME, details: details };
             fetch(GOOGLE_APP_SCRIPT_URL_LOG, {
@@ -809,7 +876,7 @@
         // 6. INITIALIZATION
         // ==========================================
         window.onload = function() {
-            if(currentUser) { showLoading('กำลังโหลดข้อมูลเบิกจ่าย...'); fetchInitialData(); }
+            ssoInit();
         };
 
     </script>
