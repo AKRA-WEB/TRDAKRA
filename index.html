@@ -1,3 +1,4 @@
+<!-- GitHub Repo: https://github.com/AKRA-WEB/TRDAKRA -->
 <!DOCTYPE html>
 <html lang="th">
 <head>
@@ -272,28 +273,30 @@
             return new Date();
         }
 
+        const TRD_CACHE_TTL = 10 * 60 * 1000;
+        function getCache(key, ttlMs) { try { const raw = localStorage.getItem(key); if (!raw) return null; const w = JSON.parse(raw); if (Date.now() - (w._ts||0) > ttlMs) { localStorage.removeItem(key); return null; } return w._d; } catch(e) { localStorage.removeItem(key); return null; } }
+        function setCache(key, data) { localStorage.setItem(key, JSON.stringify({ _ts: Date.now(), _d: data })); }
+        function mapItemData(item) {
+            return { ...item, rawDate: parseCustomDate(item.timestamp), timestamp: String(item.timestamp).includes('/') ? item.timestamp : formatDateTime(item.timestamp), oldExpiry: formatExpiryDate(item.oldExpiry), newExpiry: formatExpiryDate(item.newExpiry), storageCapacity: parseInt(item.currentStock || item.storageCapacity) || 0 };
+        }
         async function fetchInitialData(isRefresh = false) {
             if (!APPS_SCRIPT_URL) { hideLoading(); alert('กรุณาใส่ APPS_SCRIPT_URL ก่อนใช้งาน'); return; }
-            if(isRefresh) showLoading('กำลังรีเฟรชข้อมูล...');
+            if (!isRefresh) {
+                const cached = getCache('TRDAKRA_DATA', TRD_CACHE_TTL);
+                if (cached) {
+                    state.items = (cached.rawItems || []).map(mapItemData);
+                    state.products = cached.products || [];
+                    render();
+                } else { showLoading('กำลังโหลดข้อมูล...'); }
+            } else { showLoading('กำลังรีเฟรชข้อมูล...'); }
 
             try {
                 const itemsResponse = await fetch(`${APPS_SCRIPT_URL}?action=getItems`);
                 const itemsData = await itemsResponse.json();
-                
-                state.items = (itemsData || []).map(item => {
-                    return {
-                        ...item,
-                        rawDate: parseCustomDate(item.timestamp), 
-                        timestamp: String(item.timestamp).includes('/') ? item.timestamp : formatDateTime(item.timestamp),
-                        oldExpiry: formatExpiryDate(item.oldExpiry),
-                        newExpiry: formatExpiryDate(item.newExpiry),
-                        storageCapacity: parseInt(item.currentStock || item.storageCapacity) || 0 // จัดการค่าความจุหน้าร้าน
-                    };
-                });
+                state.items = (itemsData || []).map(mapItemData);
 
                 const productsResponse = await fetch(`${APPS_SCRIPT_URL}?action=getProducts`);
                 const productsData = await productsResponse.json();
-                
                 if (Array.isArray(productsData)) {
                     state.products = productsData.map(p => {
                         if (typeof p === 'object' && p !== null) return p.itemName || p.name || p[0] || p[1] || '';
@@ -301,10 +304,11 @@
                     }).filter(p => p !== '');
                 } else { state.products = []; }
 
+                setCache('TRDAKRA_DATA', { rawItems: itemsData, products: state.products });
                 render();
             } catch (error) {
                 console.error('Error fetching data:', error);
-                alert('ไม่สามารถเชื่อมต่อกับฐานข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
+                if (!getCache('TRDAKRA_DATA', TRD_CACHE_TTL)) alert('ไม่สามารถเชื่อมต่อกับฐานข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
             } finally { hideLoading(); }
         }
 
