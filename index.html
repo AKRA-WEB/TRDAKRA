@@ -172,7 +172,7 @@
         // ==========================================
         // 1. CONFIGURATION & STATE
         // ==========================================
-        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby_VL9BXR4JOPvrvWtEoKWyM_FlN5SeNdiZhYpUoeAcC7K2_aSzDJ4RlxPgd-e8RpP4Aw/exec';
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyvfdl7y8oK8e3cCsGf7-Is4JiXCq47Z-2VQN1nB8aomyLMgRILvmgxI_VGES1DhBVPDg/exec';
         let state = {
             view: 'home', 
             w1Tab: 'request', 
@@ -463,7 +463,7 @@
             const newExpiryInput = document.getElementById(`disp-exp-${id}`).value;
             const noteInput = document.getElementById(`w2-note-${id}`);
             const w2NoteValue = noteInput ? noteInput.value : '';
-            
+
             const newExpiry = newExpiryInput ? convertToCE(newExpiryInput) : 'ไม่ได้ระบุ';
 
             let note = 'ครบ';
@@ -471,10 +471,12 @@
             if (dispatchQty > reqQty) note = `เกิน ${dispatchQty - reqQty}`;
 
             let dispatchedItemName = "";
+            let dispatchedReqQty = 0;
 
             state.items = state.items.map(item => {
                 if (item.id === id) {
                     dispatchedItemName = item.itemName;
+                    dispatchedReqQty = item.requestQty;
                     return { ...item, status: 'จัดส่งแล้ว', receiveQty: dispatchQty, receiveNote: note, newExpiry: newExpiry, w2Note: w2NoteValue || item.w2Note };
                 }
                 return item;
@@ -483,6 +485,24 @@
             state.selectedReceiveId = null;
             render();
             await syncDataToSheet();
+
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false }) + ' น.';
+            fetch(APPS_SCRIPT_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'notifyLine',
+                    itemName: dispatchedItemName,
+                    reqId: id,
+                    requestQty: dispatchedReqQty,
+                    dispatchQty: dispatchQty,
+                    dispatchedBy: currentUser || 'ไม่ทราบ',
+                    timeStr: timeStr
+                })
+            }).catch(err => console.error('LINE notify error:', err));
+
             sendAppLog("จัดส่งสินค้า (AKRA)", `จัดส่ง: ${dispatchedItemName} ยอด ${dispatchQty} (${note})`);
         }
 
