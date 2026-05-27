@@ -172,7 +172,7 @@
         // ==========================================
         // 1. CONFIGURATION & STATE
         // ==========================================
-        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxp29YqW7Y_aMZEbpO6FNNwN_llCNl9X20KxBljpNkho1n44HZvOe0E8Jg469har5vi/exec';
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxZDp9CF5UsPAT6G5KVsOv6Zn0AaU2DepMgbzfVUXab7DMDlSbw_ZqGRgdBpnXF3Tj6Iw/exec';
         let state = {
             view: 'home', 
             w1Tab: 'request', 
@@ -277,7 +277,15 @@
         function getCache(key, ttlMs) { try { const raw = localStorage.getItem(key); if (!raw) return null; const w = JSON.parse(raw); if (Date.now() - (w._ts||0) > ttlMs) { localStorage.removeItem(key); return null; } return w._d; } catch(e) { localStorage.removeItem(key); return null; } }
         function setCache(key, data) { localStorage.setItem(key, JSON.stringify({ _ts: Date.now(), _d: data })); }
         function mapItemData(item) {
-            return { ...item, rawDate: parseCustomDate(item.timestamp), timestamp: String(item.timestamp).includes('/') ? item.timestamp : formatDateTime(item.timestamp), oldExpiry: formatExpiryDate(item.oldExpiry), newExpiry: formatExpiryDate(item.newExpiry), storageCapacity: parseInt(item.currentStock || item.storageCapacity) || 0 };
+            return { 
+                ...item, 
+                rawDate: parseCustomDate(item.timestamp), 
+                timestamp: String(item.timestamp).includes('/') ? item.timestamp : formatDateTime(item.timestamp), 
+                dispatchTimestamp: item.dispatchTimestamp ? (String(item.dispatchTimestamp).includes('/') ? item.dispatchTimestamp : formatDateTime(item.dispatchTimestamp)) : '',
+                oldExpiry: formatExpiryDate(item.oldExpiry), 
+                newExpiry: formatExpiryDate(item.newExpiry), 
+                storageCapacity: parseInt(item.currentStock || item.storageCapacity) || 0 
+            };
         }
         async function fetchInitialData(isRefresh = false) {
             if (!APPS_SCRIPT_URL) { hideLoading(); alert('กรุณาใส่ APPS_SCRIPT_URL ก่อนใช้งาน'); return; }
@@ -477,7 +485,15 @@
                 if (item.id === id) {
                     dispatchedItemName = item.itemName;
                     dispatchedReqQty = item.requestQty;
-                    return { ...item, status: 'จัดส่งแล้ว', receiveQty: dispatchQty, receiveNote: note, newExpiry: newExpiry, w2Note: w2NoteValue || item.w2Note };
+                    return { 
+                        ...item, 
+                        status: 'จัดส่งแล้ว', 
+                        receiveQty: dispatchQty, 
+                        receiveNote: note, 
+                        newExpiry: newExpiry, 
+                        w2Note: w2NoteValue || item.w2Note,
+                        dispatchTimestamp: formatDateTime(new Date().toISOString())
+                    };
                 }
                 return item;
             });
@@ -514,7 +530,12 @@
             state.items = state.items.map(item => {
                 if (item.id === id) {
                     targetItemName = item.itemName;
-                    return { ...item, status: newStatus, w2Note: w2NoteValue || item.w2Note };
+                    return { 
+                        ...item, 
+                        status: newStatus, 
+                        w2Note: w2NoteValue || item.w2Note,
+                        dispatchTimestamp: ['สินค้าหมด', 'ยกเลิกรายการ'].includes(newStatus) ? formatDateTime(new Date().toISOString()) : (item.dispatchTimestamp || '')
+                    };
                 }
                 return item;
             });
@@ -554,19 +575,52 @@
                         <div class="flex justify-between items-start mb-3">
                             <div class="pr-2">
                                 <h3 class="font-bold text-brand-blue text-[15px] leading-tight">${item.itemName}</h3>
-                                <p class="text-[10px] text-slate-400 font-mono tracking-wider mt-1">ID: ${item.id}</p>
+                                <div class="flex items-center gap-1.5 text-[10px] text-slate-400 mt-1 font-medium flex-wrap">
+                                    <span class="font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[9px] font-semibold">ID: ${item.id}</span>
+                                    <span class="inline-flex items-center gap-0.5 text-slate-500">
+                                        <span class="material-icons-round text-[12px] text-slate-400">schedule</span>
+                                        เบิก: ${item.timestamp}
+                                    </span>
+                                </div>
                             </div>
                             <div class="flex-shrink-0">${getStatusBadge(item.status)}</div>
                         </div>
-                        <div class="flex justify-between items-end border-t border-slate-50 pt-3 mt-1">
-                            <div class="text-xs text-slate-500 space-y-1">
-                                <p class="text-[10px] text-slate-400 flex items-center gap-1"><span class="material-icons-round text-[12px]">schedule</span> ${item.timestamp}</p>
+                        <div class="flex justify-between items-end border-t border-slate-50 pt-3 mt-1 flex-wrap gap-2">
+                            <div class="text-xs text-slate-500 space-y-1.5 w-full">
+                                <div class="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400">
+                                    <span class="inline-flex items-center gap-0.5">
+                                        <span class="material-icons-round text-[13px] text-slate-400">event_note</span>
+                                        <span class="font-semibold text-slate-500">เบิก:</span> ${item.timestamp}
+                                    </span>
+                                    ${item.dispatchTimestamp ? `
+                                        <span class="inline-flex items-center gap-0.5">
+                                            <span class="material-icons-round text-[13px] ${
+                                                item.status === 'จัดส่งแล้ว' ? 'text-emerald-500' :
+                                                item.status === 'สินค้าหมด' ? 'text-rose-500' : 'text-slate-400'
+                                            }">
+                                                ${
+                                                    item.status === 'จัดส่งแล้ว' ? 'local_shipping' :
+                                                    item.status === 'สินค้าหมด' ? 'error_outline' : 'cancel'
+                                                }
+                                            </span>
+                                            <span class="font-semibold ${
+                                                item.status === 'จัดส่งแล้ว' ? 'text-emerald-600' :
+                                                item.status === 'สินค้าหมด' ? 'text-rose-600' : 'text-slate-500'
+                                            }">
+                                                ${
+                                                    item.status === 'จัดส่งแล้ว' ? 'จัด:' :
+                                                    item.status === 'สินค้าหมด' ? 'แจ้งหมดเมื่อ:' : 'ยกเลิกเมื่อ:'
+                                                }
+                                            </span> ${item.dispatchTimestamp}
+                                        </span>
+                                    ` : ''}
+                                </div>
                                 ${item.status === 'จัดส่งแล้ว' ? `
-                                    <p class="mt-1">เบิก <span class="font-medium text-slate-700">${item.requestQty}</span> (ความจุ ${item.storageCapacity || 0}) • ส่งจริง <span class="font-medium text-emerald-600">${item.receiveQty}</span></p>
-                                    ${role === 'w1' ? `<p class="text-[11px] text-brand-blue font-medium">EXP ใหม่: ${item.newExpiry}</p>` : ''}
+                                    <p class="mt-1 text-slate-600">เบิก <span class="font-semibold text-slate-700">${item.requestQty}</span> (ความจุ ${item.storageCapacity || 0}) • ส่งจริง <span class="font-semibold text-emerald-600">${item.receiveQty}</span></p>
+                                    ${role === 'w1' ? `<p class="text-[11px] text-brand-blue font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">hourglass_empty</span> EXP ใหม่: ${item.newExpiry}</p>` : ''}
                                 ` : ''}
                             </div>
-                            ${item.status === 'จัดส่งแล้ว' && item.receiveNote && item.receiveNote !== 'ครบ' ? `<div class="text-[10px] font-medium text-brand-orange bg-brand-orange/10 px-2 py-0.5 rounded-md border border-brand-orange/20">จัดส่ง${item.receiveNote}</div>` : ''}
+                            ${item.status === 'จัดส่งแล้ว' && item.receiveNote && item.receiveNote !== 'ครบ' ? `<div class="text-[10px] font-medium text-brand-orange bg-brand-orange/5 px-2 py-0.5 rounded-md border border-brand-orange/20 mt-1">จัดส่ง${item.receiveNote}</div>` : ''}
                         </div>
                         ${item.w2Note ? `<p class="text-[11px] mt-3 text-amber-700 bg-amber-50 px-3 py-2 rounded-xl border border-amber-100/50"><span class="font-bold">โน้ต:</span> ${item.w2Note}</p>` : ''}
                     </div>
@@ -741,9 +795,12 @@
                                 <div class="bg-white rounded-[1.5rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100 overflow-hidden">
                                     ${dispatchedItems.slice(0, 20).map((bill, index) => `
                                         <div class="p-4 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
-                                            <div class="flex justify-between items-center mb-1.5">
+                                            <div class="flex justify-between items-center mb-1.5 flex-wrap gap-1">
                                                 <span class="text-[10px] font-mono font-semibold text-brand-blue bg-brand-blue/10 px-2 py-0.5 rounded">${bill.id}</span>
-                                                <span class="text-[10px] text-slate-400 flex items-center gap-1"><span class="material-icons-round text-[12px]">calendar_today</span> ${bill.timestamp.split(' / ')[0]}</span>
+                                                <div class="text-[9px] text-slate-400 flex items-center gap-2 flex-wrap">
+                                                    <span class="inline-flex items-center gap-0.5"><span class="material-icons-round text-[11px]">event_note</span>เบิก: ${bill.timestamp.split(' / ')[0]}</span>
+                                                    ${bill.dispatchTimestamp ? `<span class="inline-flex items-center gap-0.5"><span class="material-icons-round text-[11px] text-emerald-500">local_shipping</span>จัด: ${bill.dispatchTimestamp.split(' / ')[0]}</span>` : ''}
+                                                </div>
                                             </div>
                                             <p class="text-sm font-bold text-slate-800 mb-1 truncate">${bill.itemName}</p>
                                             <div class="flex justify-between items-end">
@@ -878,7 +935,13 @@
                             <div class="flex justify-between items-start mb-4">
                                 <div class="pr-2">
                                     <h3 class="font-bold text-brand-blue text-[16px] leading-snug">${item.itemName}</h3>
-                                    <span class="text-[10px] text-slate-400 font-mono tracking-wider mt-1 block">ID: ${item.id}</span>
+                                    <div class="flex items-center gap-1.5 text-[10px] text-slate-400 mt-1 font-medium flex-wrap">
+                                        <span class="font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[9px] font-semibold">ID: ${item.id}</span>
+                                        <span class="inline-flex items-center gap-0.5 text-slate-500">
+                                            <span class="material-icons-round text-[12px] text-slate-400">schedule</span>
+                                            เบิก: ${item.timestamp}
+                                        </span>
+                                    </div>
                                 </div>
                                 <div class="flex-shrink-0">${getStatusBadge(item.status)}</div>
                             </div>
@@ -922,7 +985,16 @@
                     content = `<div class="space-y-4 animate-fade-in">` + activeTasks.map(item => `
                         <div class="bg-white p-5 rounded-[1.5rem] shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-slate-100 border-l-[4px] border-l-brand-blue">
                             <div class="flex justify-between items-start mb-4">
-                                <div class="pr-2"><h3 class="font-bold text-brand-blue text-[16px] leading-snug">${item.itemName}</h3><span class="text-[10px] text-slate-400 font-mono tracking-wider mt-1 block">ID: ${item.id}</span></div>
+                                <div class="pr-2">
+                                    <h3 class="font-bold text-brand-blue text-[16px] leading-snug">${item.itemName}</h3>
+                                    <div class="flex items-center gap-1.5 text-[10px] text-slate-400 mt-1 font-medium flex-wrap">
+                                        <span class="font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[9px] font-semibold">ID: ${item.id}</span>
+                                        <span class="inline-flex items-center gap-0.5 text-slate-500">
+                                            <span class="material-icons-round text-[12px] text-slate-400">schedule</span>
+                                            เบิก: ${item.timestamp}
+                                        </span>
+                                    </div>
+                                </div>
                                 <div class="flex-shrink-0">${getStatusBadge(item.status)}</div>
                             </div>
                             <div class="bg-brand-blue/5 rounded-2xl p-4 mb-4 flex justify-between items-center border border-brand-blue/10">
