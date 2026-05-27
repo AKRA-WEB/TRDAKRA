@@ -172,7 +172,7 @@
         // ==========================================
         // 1. CONFIGURATION & STATE
         // ==========================================
-        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxQOFkdDZBpUzvcf5TBKtfdFT0QHW-sViPxJ-eD5Ui7MbWGfcOzeUTeHhqRAfzMW0Y/exec';
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxsopKZ59Wd6GuJrgeFTM08QceK28_DPbuysKv8pvcpqDMSXgKU0iogaq5hREp_KA/exec';
         let state = {
             view: 'home', 
             w1Tab: 'request', 
@@ -181,7 +181,7 @@
             selectedReceiveId: null, 
             items: [], 
             products: [], 
-            w1Rows: [{ itemName: '', qty: '', storageCapacity: '', oldExpiry: '' }] 
+            w1Rows: [{ itemName: '', qty: '', storageCapacity: '', oldExpiry: '', unit: '' }] 
         };
 
         function showLoading(text = 'กำลังทำงาน...') {
@@ -288,6 +288,20 @@
                 storageCapacity: parseInt(item.currentStock || item.storageCapacity) || 0 
             };
         }
+        function getProductUnitClient(itemName) {
+            if (!itemName) return 'หน่วย';
+            const prod = state.products.find(p => {
+                if (typeof p === 'object' && p !== null) {
+                    return (p.name || p.itemName || '').trim() === itemName.trim();
+                }
+                return String(p).trim() === itemName.trim();
+            });
+            if (prod && typeof prod === 'object') {
+                return prod.unit || 'หน่วย';
+            }
+            return 'หน่วย';
+        }
+
         async function fetchInitialData(isRefresh = false) {
             if (!APPS_SCRIPT_URL) { hideLoading(); alert('กรุณาใส่ APPS_SCRIPT_URL ก่อนใช้งาน'); return; }
             if (!isRefresh) {
@@ -308,9 +322,14 @@
                 const productsData = await productsResponse.json();
                 if (Array.isArray(productsData)) {
                     state.products = productsData.map(p => {
-                        if (typeof p === 'object' && p !== null) return p.itemName || p.name || p[0] || p[1] || '';
-                        return String(p).trim();
-                    }).filter(p => p !== '');
+                        if (typeof p === 'object' && p !== null) {
+                            return {
+                                name: p.name || p.itemName || p[0] || '',
+                                unit: p.unit || p[1] || 'หน่วย'
+                            };
+                        }
+                        return { name: String(p).trim(), unit: 'หน่วย' };
+                    }).filter(p => p.name !== '');
                 } else { state.products = []; }
 
                 setCache('TRDAKRA_DATA', { rawItems: itemsData, products: state.products });
@@ -342,7 +361,7 @@
             if (!listDiv) return;
 
             const q = query.toLowerCase().trim();
-            let filtered = !q ? state.products.slice(0, 50) : state.products.filter(p => p.toLowerCase().includes(q)).slice(0, 50);
+            let filtered = !q ? state.products.slice(0, 50) : state.products.filter(p => p.name.toLowerCase().includes(q)).slice(0, 50);
 
             if (filtered.length === 0) {
                 listDiv.innerHTML = state.products.length === 0 ? 
@@ -350,17 +369,18 @@
                     `<div class="p-4 text-sm text-slate-400 text-center">ไม่พบสินค้าที่ค้นหา</div>`;
             } else {
                 listDiv.innerHTML = filtered.map(p => `
-                    <div onclick="selectProduct(decodeURIComponent('${encodeURIComponent(p)}'), ${index})" 
+                    <div onclick="selectProduct(decodeURIComponent('${encodeURIComponent(p.name)}'), decodeURIComponent('${encodeURIComponent(p.unit)}'), ${index})" 
                          class="px-4 py-3 hover:bg-blue-50 hover:text-blue-700 cursor-pointer border-b border-slate-50 text-sm text-slate-700 last:border-0 truncate flex items-center gap-3 transition-colors">
-                        <span class="material-icons-round text-blue-300 text-[18px]">inventory_2</span> ${p}
+                        <span class="material-icons-round text-blue-300 text-[18px]">inventory_2</span> ${p.name} <span class="text-xs text-slate-400">(${p.unit})</span>
                     </div>
                 `).join('');
             }
             listDiv.classList.remove('hidden');
         }
 
-        function selectProduct(name, index) {
+        function selectProduct(name, unit, index) {
             updateW1RowValue(index, 'itemName', name);
+            updateW1RowValue(index, 'unit', unit);
             render();
         }
 
@@ -371,7 +391,7 @@
             state.view = viewName; 
             state.selectedReceiveId = null; 
             if (viewName === 'w1') {
-                state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', oldExpiry: '' }];
+                state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', oldExpiry: '', unit: '' }];
             }
             render(); 
         }
@@ -380,7 +400,7 @@
         function setDashboardFilter(val) { state.dashboardFilter = val; render(); }
 
         function addW1Row() {
-            state.w1Rows.push({ itemName: '', qty: '', storageCapacity: '', oldExpiry: '' });
+            state.w1Rows.push({ itemName: '', qty: '', storageCapacity: '', oldExpiry: '', unit: '' });
             render();
         }
 
@@ -425,7 +445,8 @@
             
             await syncDataToSheet(); 
             alert('ส่งคำขอเบิกสินค้าเรียบร้อยแล้ว!');
-            sendAppLog("สั่งเบิกสินค้า (TRD)", `เบิก: ${itemName} จำนวน ${qty} ชิ้น (ความจุ: ${storageCapacity})`);
+            const unit = getProductUnitClient(itemName);
+            sendAppLog("สั่งเบิกสินค้า (TRD)", `เบิก: ${itemName} จำนวน ${qty} ${unit} (ความจุ: ${storageCapacity})`);
         }
 
         async function handleW1SubmitBulk() {
@@ -456,7 +477,7 @@
             state.items = [...newItems, ...state.items];
             
             // Reset rows and switch tab
-            state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', oldExpiry: '' }];
+            state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', oldExpiry: '', unit: '' }];
             state.w1Tab = 'pending';
             render();
 
@@ -477,17 +498,17 @@
 
             const newExpiry = newExpiryInput ? convertToCE(newExpiryInput) : 'ไม่ได้ระบุ';
 
-            let note = 'ครบ';
-            if (dispatchQty < reqQty) note = `ขาด ${reqQty - dispatchQty}`;
-            if (dispatchQty > reqQty) note = `เกิน ${dispatchQty - reqQty}`;
+            const targetItem = state.items.find(item => item.id === id);
+            const dispatchedItemName = targetItem ? targetItem.itemName : "";
+            const dispatchedReqQty = targetItem ? targetItem.requestQty : 0;
+            const unit = getProductUnitClient(dispatchedItemName);
 
-            let dispatchedItemName = "";
-            let dispatchedReqQty = 0;
+            let note = 'ครบ';
+            if (dispatchQty < reqQty) note = `ขาด ${reqQty - dispatchQty} ${unit}`;
+            if (dispatchQty > reqQty) note = `เกิน ${dispatchQty - reqQty} ${unit}`;
 
             state.items = state.items.map(item => {
                 if (item.id === id) {
-                    dispatchedItemName = item.itemName;
-                    dispatchedReqQty = item.requestQty;
                     return { 
                         ...item, 
                         status: 'จัดส่งแล้ว', 
@@ -522,7 +543,7 @@
                 })
             }).catch(err => console.error('LINE notify error:', err));
 
-            sendAppLog("จัดส่งสินค้า (AKRA)", `จัดส่ง: ${dispatchedItemName} ยอด ${dispatchQty} (${note})`);
+            sendAppLog("จัดส่งสินค้า (AKRA)", `จัดส่ง: ${dispatchedItemName} ยอด ${dispatchQty} ${unit} (${note})`);
         }
 
         async function updateItemStatus(id, newStatus) {
@@ -625,7 +646,7 @@
                                     ` : ''}
                                 </div>
                                 ${item.status === 'จัดส่งแล้ว' ? `
-                                    <p class="mt-1 text-slate-600">เบิก <span class="font-semibold text-slate-700">${item.requestQty}</span> (ความจุ ${item.storageCapacity || 0}) • ส่งจริง <span class="font-semibold text-emerald-600">${item.receiveQty}</span></p>
+                                    <p class="mt-1 text-slate-600">เบิก <span class="font-semibold text-slate-700">${item.requestQty} ${getProductUnitClient(item.itemName)}</span> (ความจุ ${item.storageCapacity || 0}) • ส่งจริง <span class="font-semibold text-emerald-600">${item.receiveQty} ${getProductUnitClient(item.itemName)}</span></p>
                                     ${role === 'w1' ? `<p class="text-[11px] text-brand-blue font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">hourglass_empty</span> EXP ใหม่: ${item.newExpiry}</p>` : ''}
                                 ` : ''}
                             </div>
@@ -905,12 +926,12 @@
 
                                         <div class="grid grid-cols-2 gap-3">
                                             <div>
-                                                <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">จำนวน</label>
+                                                <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">จำนวน ${row.unit ? `(${row.unit})` : ''}</label>
                                                 <input type="number" value="${row.qty}" oninput="updateW1RowValue(${index}, 'qty', this.value)" 
                                                     class="w-full p-3 bg-white border border-slate-200 rounded-xl focus:border-brand-blue text-sm font-bold" placeholder="0">
                                             </div>
                                             <div>
-                                                <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">ความจุ</label>
+                                                <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">ความจุ ${row.unit ? `(${row.unit})` : ''}</label>
                                                 <input type="number" value="${row.storageCapacity}" oninput="updateW1RowValue(${index}, 'storageCapacity', this.value)" 
                                                     class="w-full p-3 bg-white border border-slate-200 rounded-xl focus:border-brand-blue text-sm" placeholder="ถ้าทราบ">
                                             </div>
@@ -961,7 +982,7 @@
                                 <div class="flex-shrink-0">${getStatusBadge(item.status)}</div>
                             </div>
                             <div class="bg-brand-blue/5 rounded-2xl p-4 mb-4 flex justify-between items-center border border-brand-blue/10">
-                                <div><p class="text-[10px] font-semibold text-brand-blue uppercase tracking-wider mb-0.5">ยอดเบิก / ความจุ</p><p class="font-bold text-brand-blue text-lg">${item.requestQty} <span class="text-xs font-medium text-brand-blue/70">เบิก</span> / ${item.storageCapacity || 0} <span class="text-xs font-medium text-brand-blue/70">สต๊อคจัดเก็บได้</span></p></div>
+                                <div><p class="text-[10px] font-semibold text-brand-blue uppercase tracking-wider mb-0.5">ยอดเบิก / ความจุ</p><p class="font-bold text-brand-blue text-lg">${item.requestQty} <span class="text-xs font-medium text-brand-blue/70">${getProductUnitClient(item.itemName)}</span> / ${item.storageCapacity || 0} <span class="text-xs font-medium text-brand-blue/70">สต๊อคจัดเก็บได้</span></p></div>
                                 <div class="text-right"><p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-0.5">เวลาเบิก</p><p class="text-xs text-slate-700 font-medium">${item.timestamp.split(' / ')[1] || '-'}</p><p class="text-[10px] text-slate-400">${item.timestamp.split(' / ')[0] || '-'}</p></div>
                             </div>
                             ${item.w2Note ? `<p class="text-xs mb-4 text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-100 flex items-start gap-2"><span class="material-icons-round text-[16px] mt-px">info</span> <span>${item.w2Note}</span></p>` : ''}
@@ -1019,7 +1040,7 @@
                                 <div class="flex-shrink-0">${getStatusBadge(item.status)}</div>
                             </div>
                             <div class="bg-brand-blue/5 rounded-2xl p-4 mb-4 flex justify-between items-center border border-brand-blue/10">
-                                <div><p class="text-[10px] font-semibold text-brand-blue uppercase tracking-wider mb-0.5">ยอดสั่งเบิก / ความจุ</p><p class="font-bold text-brand-blue text-lg">${item.requestQty} <span class="text-xs font-medium text-brand-blue/70">เบิก</span> / ${item.storageCapacity || 0} <span class="text-xs font-medium text-brand-blue/70">สต๊อคจัดเก็บได้</span></p></div>
+                                <div><p class="text-[10px] font-semibold text-brand-blue uppercase tracking-wider mb-0.5">ยอดสั่งเบิก / ความจุ</p><p class="font-bold text-brand-blue text-lg">${item.requestQty} <span class="text-xs font-medium text-brand-blue/70">${getProductUnitClient(item.itemName)}</span> / ${item.storageCapacity || 0} <span class="text-xs font-medium text-brand-blue/70">สต๊อคจัดเก็บได้</span></p></div>
                                 <div class="text-right"><p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-0.5">หมดอายุเก่า</p><p class="text-xs text-slate-700 font-medium">${item.oldExpiry}</p></div>
                             </div>
                             <div class="mb-5">
@@ -1038,7 +1059,7 @@
                                 <form onsubmit="handleDispatchSubmit(event, '${item.id}', ${item.requestQty})" class="mt-4 pt-4 border-t border-slate-100 animate-fade-in">
                                     <h4 class="font-bold text-brand-orange text-sm mb-4 flex items-center justify-center gap-2"><span class="material-icons-round text-[18px]">inventory</span> ฟอร์มยืนยันการจัดส่ง</h4>
                                     <div class="space-y-4">
-                                        <div><label class="block text-[11px] font-semibold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">ยอดจัดส่งจริง (ชิ้น)</label><input type="number" id="disp-qty-${item.id}" required min="0" value="${item.requestQty}" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-brand-orange focus:ring-1 focus:ring-brand-orange text-center text-lg font-bold text-brand-orange transition-all"></div>
+                                        <div><label class="block text-[11px] font-semibold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">ยอดจัดส่งจริง (${getProductUnitClient(item.itemName)})</label><input type="number" id="disp-qty-${item.id}" required min="0" value="${item.requestQty}" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-brand-orange focus:ring-1 focus:ring-brand-orange text-center text-lg font-bold text-brand-orange transition-all"></div>
                                         <div><label class="block text-[11px] font-semibold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">วันหมดอายุใหม่</label><input type="text" id="disp-exp-${item.id}" class="w-full p-3.5 bg-slate-50 border border-transparent rounded-xl focus:bg-white focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10 text-sm transition-all" placeholder="วว-ดด-ปป (ถ้ามี)"></div>
                                         <div class="flex gap-3 pt-2">
                                             <button type="button" onclick="openReceiveForm(null)" class="flex-1 bg-white border border-slate-200 text-slate-500 py-3.5 rounded-xl font-medium text-sm transition-colors hover:bg-slate-50">ยกเลิก</button>
