@@ -535,7 +535,7 @@
                 body: JSON.stringify({
                     action: 'notifyLine',
                     itemName: dispatchedItemName,
-                    reqId: id,
+                    reqDate: targetItem ? targetItem.timestamp : '',
                     requestQty: dispatchedReqQty,
                     dispatchQty: dispatchQty,
                     dispatchedBy: currentUser || 'ไม่ทราบ',
