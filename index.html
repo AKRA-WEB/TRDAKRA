@@ -282,6 +282,7 @@
                 rawDate: parseCustomDate(item.timestamp), 
                 timestamp: String(item.timestamp).includes('/') ? item.timestamp : formatDateTime(item.timestamp), 
                 dispatchTimestamp: item.dispatchTimestamp ? (String(item.dispatchTimestamp).includes('/') ? item.dispatchTimestamp : formatDateTime(item.dispatchTimestamp)) : '',
+                requestedBy: item.requestedBy || '',
                 oldExpiry: formatExpiryDate(item.oldExpiry), 
                 newExpiry: formatExpiryDate(item.newExpiry), 
                 storageCapacity: parseInt(item.currentStock || item.storageCapacity) || 0 
@@ -414,7 +415,8 @@
                 storageCapacity: storageCapacity ? parseInt(storageCapacity) : 0, // บันทึกค่าความจุ
                 status: 'สั่งเบิก',
                 oldExpiry: oldExpiryInput ? convertToCE(oldExpiryInput) : 'ไม่ได้ระบุ',
-                newExpiry: '', receiveQty: null, receiveNote: '', w2Note: '' 
+                newExpiry: '', receiveQty: null, receiveNote: '', w2Note: '',
+                requestedBy: currentUser || 'ไม่ทราบ'
             };
 
             state.items.unshift(newItem); 
@@ -446,7 +448,8 @@
                 storageCapacity: row.storageCapacity ? parseInt(row.storageCapacity) : 0,
                 status: 'สั่งเบิก',
                 oldExpiry: row.oldExpiry ? convertToCE(row.oldExpiry) : 'ไม่ได้ระบุ',
-                newExpiry: '', receiveQty: null, receiveNote: '', w2Note: '' 
+                newExpiry: '', receiveQty: null, receiveNote: '', w2Note: '',
+                requestedBy: currentUser || 'ไม่ทราบ'
             }));
 
             // Prepend all new items to the global items list
@@ -581,6 +584,12 @@
                                         <span class="material-icons-round text-[12px] text-slate-400">schedule</span>
                                         เบิก: ${item.timestamp}
                                     </span>
+                                    ${item.requestedBy ? `
+                                        <span class="inline-flex items-center gap-0.5 text-brand-blue bg-brand-blue/5 border border-brand-blue/10 px-1.5 py-0.5 rounded-[4px] text-[9px] font-semibold">
+                                            <span class="material-icons-round text-[11px] text-brand-blue/70">account_circle</span>
+                                            ${item.requestedBy}
+                                        </span>
+                                    ` : ''}
                                 </div>
                             </div>
                             <div class="flex-shrink-0">${getStatusBadge(item.status)}</div>
@@ -941,6 +950,12 @@
                                             <span class="material-icons-round text-[12px] text-slate-400">schedule</span>
                                             เบิก: ${item.timestamp}
                                         </span>
+                                        ${item.requestedBy ? `
+                                            <span class="inline-flex items-center gap-0.5 text-brand-blue bg-brand-blue/5 border border-brand-blue/10 px-1.5 py-0.5 rounded-[4px] text-[9px] font-semibold">
+                                                <span class="material-icons-round text-[11px] text-brand-blue/70">account_circle</span>
+                                                ${item.requestedBy}
+                                            </span>
+                                        ` : ''}
                                     </div>
                                 </div>
                                 <div class="flex-shrink-0">${getStatusBadge(item.status)}</div>
@@ -993,6 +1008,12 @@
                                             <span class="material-icons-round text-[12px] text-slate-400">schedule</span>
                                             เบิก: ${item.timestamp}
                                         </span>
+                                        ${item.requestedBy ? `
+                                            <span class="inline-flex items-center gap-0.5 text-brand-blue bg-brand-blue/5 border border-brand-blue/10 px-1.5 py-0.5 rounded-[4px] text-[9px] font-semibold">
+                                                <span class="material-icons-round text-[11px] text-brand-blue/70">account_circle</span>
+                                                ${item.requestedBy}
+                                            </span>
+                                        ` : ''}
                                     </div>
                                 </div>
                                 <div class="flex-shrink-0">${getStatusBadge(item.status)}</div>
