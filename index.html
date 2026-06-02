@@ -205,7 +205,9 @@
             locationFloorFilter: '',
             locationZoneFilter: '',
             locationAddMode: false,
-            locationAddSearch: ''
+            locationAddSearch: '',
+            locationNewZoneMode: false,
+            locationNewZoneInput: ''
         };
 
         function showLoading(text = 'กำลังทำงาน...') {
@@ -361,7 +363,18 @@
             state.locationFloorFilter = state.locationFloorFilter === floor ? '' : floor;
             state.locationZoneFilter = '';
             state.locationAddMode = false;
+            state.locationNewZoneMode = false;
+            state.locationNewZoneInput = '';
             state.locationSearch = '';
+            render();
+        }
+
+        function confirmNewZone() {
+            const z = (state.locationNewZoneInput || '').trim().toUpperCase();
+            if (!z) return;
+            state.locationZoneFilter = z;
+            state.locationNewZoneMode = false;
+            state.locationNewZoneInput = '';
             render();
         }
 
@@ -544,6 +557,8 @@
                 state.locationZoneFilter = '';
                 state.locationAddMode = false;
                 state.locationAddSearch = '';
+                state.locationNewZoneMode = false;
+                state.locationNewZoneInput = '';
             }
             if (viewName === 'survey') {
                 // Restore survey data but always land on floor selector
@@ -1858,8 +1873,20 @@
                             const cnt = state.products.filter(p => p.floor === floorF && extractZone(p.location) === z).length;
                             return `<button onclick="setLocationZone('${z}')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${zoneF === z ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-500'}">โซน ${z} (${cnt})</button>`;
                         }).join('')}
-                        ${canAdd ? `<button onclick="toggleLocationAddMode()" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold bg-emerald-500 text-white flex items-center gap-1 transition-all"><span class="material-icons-round text-[13px]">add</span> เพิ่มสินค้า</button>` : ''}
+                        <button onclick="state.locationNewZoneMode=!state.locationNewZoneMode; state.locationNewZoneInput=''; render()" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all flex items-center gap-1 ${state.locationNewZoneMode ? 'bg-slate-400 text-white' : 'bg-white border-2 border-dashed border-indigo-300 text-indigo-500'}"><span class="material-icons-round text-[13px]">add</span> โซนใหม่</button>
+                        ${canAdd ? `<button onclick="toggleLocationAddMode()" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold bg-emerald-500 text-white flex items-center gap-1 transition-all"><span class="material-icons-round text-[13px]">inventory_2</span> เพิ่มสินค้า</button>` : ''}
+                    </div>
+                    ${state.locationNewZoneMode ? `
+                    <div class="bg-indigo-50 border-b border-indigo-200 px-3 py-3 flex gap-2 items-center">
+                        <input type="text" value="${state.locationNewZoneInput}" placeholder="ชื่อโซน เช่น 1B, A2..."
+                            oninput="state.locationNewZoneInput=this.value"
+                            onkeydown="if(event.key==='Enter') confirmNewZone()"
+                            autofocus
+                            class="flex-1 p-2.5 bg-white border border-indigo-300 rounded-xl text-sm font-bold focus:border-indigo-500 transition-all uppercase">
+                        <button onclick="confirmNewZone()" class="flex-shrink-0 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-all">เลือก</button>
+                        <button onclick="state.locationNewZoneMode=false; render()" class="flex-shrink-0 px-3 py-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl text-sm active:scale-95 transition-all">ยกเลิก</button>
                     </div>` : ''}
+                    ` : ''}
 
                     <!-- Add panel -->
                     ${addMode && canAdd ? `
