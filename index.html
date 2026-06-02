@@ -468,27 +468,23 @@
                 state.locationEdits = {};
             }
             if (viewName === 'survey') {
-                // Restore saved survey session if exists
+                // Restore survey data but always land on floor selector
                 try {
                     const saved = localStorage.getItem('TRDAKRA_SURVEY_SESSION');
                     if (saved) {
                         const session = JSON.parse(saved);
                         state.surveyFloor = session.floor || null;
                         state.surveyData = session.data || {};
-                        state.surveyView = state.surveyFloor ? 'list' : 'floors';
-                        state.surveyConfirmList = [];
                     } else {
-                        state.surveyView = 'floors';
                         state.surveyFloor = null;
                         state.surveyData = {};
-                        state.surveyConfirmList = [];
                     }
                 } catch(e) {
-                    state.surveyView = 'floors';
                     state.surveyFloor = null;
                     state.surveyData = {};
-                    state.surveyConfirmList = [];
                 }
+                state.surveyView = 'floors';
+                state.surveyConfirmList = [];
             }
             render();
         }
