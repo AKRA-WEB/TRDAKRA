@@ -205,7 +205,8 @@
             // Check Stock State
             checkStockLocation: null,
             checkStockEdits: {}, // { productName: { checked: true, currentStock: '', requestQty: '' } }
-            checkStockSearch: ''
+            checkStockSearch: '',
+            checkStockCheckedLocations: JSON.parse(localStorage.getItem('TRDAKRA_CHECKED_LOCATIONS') || '{}')
         };
 
         function showLoading(text = 'กำลังทำงาน...') {
@@ -1732,6 +1733,34 @@
         // ==========================================
         // 4c. CHECK STOCK ACTION HANDLERS
         // ==========================================
+        function getCleanedCheckedLocations() {
+            const locs = state.checkStockCheckedLocations || {};
+            const cleaned = {};
+            let changed = false;
+            
+            const now = new Date();
+            const cutoff = new Date();
+            cutoff.setHours(18, 0, 0, 0); // 18:00 วันนี้
+            if (now.getTime() < cutoff.getTime()) {
+                cutoff.setDate(cutoff.getDate() - 1); // 18:00 เมื่อวาน
+            }
+            const cutoffTime = cutoff.getTime();
+
+            for (const loc in locs) {
+                const checkTime = new Date(locs[loc]).getTime();
+                if (checkTime >= cutoffTime) {
+                    cleaned[loc] = locs[loc];
+                } else {
+                    changed = true;
+                }
+            }
+            if (changed) {
+                state.checkStockCheckedLocations = cleaned;
+                localStorage.setItem('TRDAKRA_CHECKED_LOCATIONS', JSON.stringify(cleaned));
+            }
+            return cleaned;
+        }
+
         function selectCheckStockLocation(location) {
             state.checkStockLocation = location;
             state.checkStockEdits = {};
@@ -1908,6 +1937,11 @@
                 alert(`✅ บันทึกสต๊อกสำเร็จ!\nส่งสั่งเบิก ${newOrders.length} รายการ จากโลเคชั่น ${loc}`);
                 sendAppLog('ตรวจสต๊อกรายโลเคชั่น', `โลเคชั่น ${loc}: ส่งเบิก ${newOrders.length} รายการ`);
 
+                // Mark location as checked
+                if (!state.checkStockCheckedLocations) state.checkStockCheckedLocations = {};
+                state.checkStockCheckedLocations[loc] = new Date().toISOString();
+                localStorage.setItem('TRDAKRA_CHECKED_LOCATIONS', JSON.stringify(state.checkStockCheckedLocations));
+
                 // Reset and go back to location selector page
                 state.checkStockLocation = null;
                 state.checkStockEdits = {};
@@ -2030,6 +2064,7 @@
                 } else {
                     floorsHtml = sortedFloors.map(f => {
                         const locs = [...floorGroups[f]].sort((a,b) => a.localeCompare(b, undefined, {numeric: true, sensitivity: 'base'}));
+                        const cleanedChecked = getCleanedCheckedLocations();
                         return `
                             <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3">
                                 <h3 class="text-xs font-bold text-brand-blue flex items-center gap-1.5 border-b border-slate-50 pb-2">
@@ -2038,11 +2073,20 @@
                                 <div class="grid grid-cols-3 gap-2">
                                     ${locs.map(loc => {
                                         const count = state.products.filter(p => p.location === loc && p.floor !== 'NOSTK').length;
+                                        const isCheckedToday = !!cleanedChecked[loc];
+                                        
+                                        const btnBg = isCheckedToday 
+                                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100/50 hover:border-emerald-300' 
+                                            : 'bg-slate-50 border-slate-200 hover:border-brand-blue hover:bg-brand-blue/5 text-slate-700 hover:text-brand-blue';
+                                            
                                         return `
                                             <button onclick="selectCheckStockLocation('${loc}')"
-                                                class="py-3 px-2 bg-slate-50 border border-slate-200 hover:border-brand-blue hover:bg-brand-blue/5 text-slate-700 hover:text-brand-blue rounded-xl text-center active:scale-95 transition-all flex flex-col justify-center items-center gap-1">
-                                                <span class="text-xs font-bold tracking-wide">${loc}</span>
-                                                <span class="text-[9px] text-slate-400 font-medium">${count} รายการ</span>
+                                                class="py-3 px-2 border rounded-xl text-center active:scale-95 transition-all flex flex-col justify-center items-center gap-1 ${btnBg}">
+                                                <span class="text-xs font-bold tracking-wide flex items-center gap-1">
+                                                    ${isCheckedToday ? '<span class="material-icons-round text-[12px] text-emerald-600">check_circle</span>' : ''}
+                                                    ${loc}
+                                                </span>
+                                                <span class="text-[9px] ${isCheckedToday ? 'text-emerald-600/70' : 'text-slate-400'} font-medium">${count} รายการ</span>
                                             </button>`;
                                     }).join('')}
                                 </div>
