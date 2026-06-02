@@ -1,0 +1,523 @@
+// ==========================================
+// 1. ตั้งค่าการเชื่อมต่อ Google Sheets
+// ==========================================
+const SHEET_ID = "1iUjCobjItCivwlpT2qmC-4ADG1jx1Z-TMLc7ETq_KKE";
+const SHEET_NAME = "เบิกย้ายW1";         // ชีตประวัติการเบิก
+const PRODUCT_SHEET_NAME = "Product";    // ชีตฐานข้อมูลสินค้า
+const SURVEY_LOG_SHEET_NAME = "SurveyLog"; // ชีตบันทึกผลสำรวจ (ใหม่)
+
+// ==========================================
+// LINE Messaging API Config
+// ==========================================
+const LINE_CHANNEL_TOKEN = "DAM4hAvhD8WbO/20n+NgznYh+NI92KeI7OiK0JBMw/OnlAbzeo0lLnxxUwGFZHWRW1scgfuIEYIMMfsFw2FuDP5FlV6uBBG1ODokCDOiwpDJOibO/NhjGSKPC5ynwMnhkhXfDsYbK19KNedLJ86hDgdB04t89/1O/w1cDnyilFU=";
+const LINE_GROUP_ID = "C48f60501bf5fe6c986a9ce4d3ff1e4aa";
+
+function testLineNotify() {
+  sendLineDispatchNotification("ทดสอบ - ครีมเทียม Rich's", "REQ-9999", 10, 10, "แอดมิน", "12:00 น.");
+}
+
+function getProductUnit(itemName) {
+  try {
+    var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(PRODUCT_SHEET_NAME);
+    if (!sheet) return "หน่วย";
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    if (lastRow < 2) return "หน่วย";
+    var rangeValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+    var headers = rangeValues[0];
+    var nameColIndex = headers.indexOf("Product name");
+    if (nameColIndex === -1) nameColIndex = 1;
+    var unitColIndex = headers.indexOf("Unit");
+    if (unitColIndex === -1) unitColIndex = headers.indexOf("unit");
+    if (unitColIndex === -1) unitColIndex = headers.indexOf("หน่วย");
+    if (unitColIndex === -1) { unitColIndex = nameColIndex + 1; if (unitColIndex >= lastCol) unitColIndex = lastCol - 1; }
+    for (var i = 1; i < rangeValues.length; i++) {
+      var name = rangeValues[i][nameColIndex];
+      if (name && name.toString().trim() === itemName.toString().trim()) {
+        var unitValue = rangeValues[i][unitColIndex];
+        if (unitValue) return unitValue.toString().trim();
+      }
+    }
+  } catch (error) { Logger.log("Error in getProductUnit: " + error.toString()); }
+  return "หน่วย";
+}
+
+function sendLineDispatchNotification(itemName, reqDate, requestQty, dispatchQty, dispatchedBy, timeStr) {
+  var unit = getProductUnit(itemName);
+  var messageText = "📤 [ AKRA > TRD ] จัดส่งสินค้าแล้ว\n" +
+    "📋 รายการ: " + itemName + "\n" +
+    "▶ วันที่สั่งเบิก: " + reqDate + "\n" +
+    "▶ ยอดสั่งเบิก: " + requestQty + " " + unit + "\n" +
+    "▶ ยอดจัดส่งจริง: " + dispatchQty + " " + unit + "\n" +
+    "▶ ผู้จัดส่ง: " + dispatchedBy + "\n" +
+    "▶ เวลา: " + timeStr;
+  var url = "https://api.line.me/v2/bot/message/push";
+  var payload = { "to": LINE_GROUP_ID, "messages": [{ "type": "text", "text": messageText }] };
+  var options = {
+    "method": "post", "contentType": "application/json",
+    "headers": { "Authorization": "Bearer " + LINE_CHANNEL_TOKEN },
+    "payload": JSON.stringify(payload), "muteHttpExceptions": true
+  };
+  try {
+    var response = UrlFetchApp.fetch(url, options);
+    Logger.log("LINE API Response (" + response.getResponseCode() + "): " + response.getContentText());
+  } catch (error) { Logger.log("LINE Exception: " + error.toString()); }
+}
+
+// ==========================================
+// 2. รับ Request จากหน้าเว็บ (ดึงข้อมูล)
+// ==========================================
+function doGet(e) {
+  if (!e || !e.parameter) {
+    return ContentService.createTextOutput("API is running.");
+  }
+  var action = e.parameter.action;
+
+  if (action === 'getProducts') {
+    return ContentService.createTextOutput(JSON.stringify(getProductList()))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  if (action === 'getItems') {
+    return ContentService.createTextOutput(JSON.stringify(getInventoryData()))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  if (action === 'getSurveyLog') {
+    return ContentService.createTextOutput(JSON.stringify(getSurveyLog()))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  var defaultData = getInventoryData();
+  return ContentService.createTextOutput(JSON.stringify(defaultData))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ==========================================
+// 3. รับ Request จากหน้าเว็บ (บันทึกข้อมูล)
+// ==========================================
+function doPost(e) {
+  try {
+    var body = JSON.parse(e.postData.contents);
+
+    if (body.action === 'notifyLine') {
+      sendLineDispatchNotification(body.itemName, body.reqDate || body.reqId, body.requestQty, body.dispatchQty, body.dispatchedBy, body.timeStr);
+      return ContentService.createTextOutput(JSON.stringify({ status: 'success' })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ── ใหม่: บันทึก Floor/Location/ParLevel กลับ Product Sheet ──
+    if (body.action === 'updateProductDetails') {
+      var ok = updateProductDetails(body.name, body.floor, body.location, body.parLevel);
+      return ContentService.createTextOutput(JSON.stringify({ status: ok ? 'success' : 'error' })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ── ใหม่: บันทึกผลสำรวจลง SurveyLog Sheet ──
+    if (body.action === 'saveSurveyLog') {
+      var ok2 = saveSurveyLog(body.surveyedBy, body.floor, body.items);
+      return ContentService.createTextOutput(JSON.stringify({ status: ok2 ? 'success' : 'error' })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    var success = updateInventoryData(body);
+    return ContentService.createTextOutput(JSON.stringify({ status: 'success', success: success })).setMimeType(ContentService.MimeType.JSON);
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: error.toString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// ===============================================
+// 4. ฟังก์ชันดึง "รายชื่อสินค้า" จากชีต Product
+//    คืนค่า: name, unit, floor, location, parLevel
+// ===============================================
+function getProductList() {
+  try {
+    var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(PRODUCT_SHEET_NAME);
+    if (!sheet) return [];
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    if (lastRow < 2) return [];
+
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+
+    // หาตำแหน่งคอลัมน์ที่มีอยู่
+    var nameColIndex = headers.indexOf("Product name");
+    if (nameColIndex === -1) nameColIndex = 1;
+    var unitColIndex = headers.indexOf("Unit");
+    if (unitColIndex === -1) unitColIndex = headers.indexOf("unit");
+    if (unitColIndex === -1) unitColIndex = headers.indexOf("หน่วย");
+    if (unitColIndex === -1) { unitColIndex = nameColIndex + 1; if (unitColIndex >= lastCol) unitColIndex = lastCol - 1; }
+
+    // คอลัมน์ใหม่ (ถ้าไม่มีใน Sheet จะคืนค่าว่าง)
+    var floorColIndex    = headers.indexOf("Floor");
+    var locationColIndex = headers.indexOf("Location");
+    var parLevelColIndex = headers.indexOf("Par Level");
+
+    var dataValues = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    var products = [];
+
+    for (var i = 0; i < dataValues.length; i++) {
+      var name = dataValues[i][nameColIndex];
+      if (name) {
+        products.push({
+          name:     name.toString().trim(),
+          unit:     unitColIndex >= 0 && dataValues[i][unitColIndex] ? dataValues[i][unitColIndex].toString().trim() : "หน่วย",
+          floor:    floorColIndex >= 0    ? (dataValues[i][floorColIndex]    || "").toString().trim() : "",
+          location: locationColIndex >= 0 ? (dataValues[i][locationColIndex] || "").toString().trim() : "",
+          parLevel: parLevelColIndex >= 0 ? (parseInt(dataValues[i][parLevelColIndex]) || 0) : 0
+        });
+      }
+    }
+    return products;
+  } catch (error) {
+    Logger.log("Error in getProductList: " + error.toString());
+    return [];
+  }
+}
+
+// ===============================================
+// 5. ฟังก์ชัน (ใหม่) อัปเดต Floor/Location/ParLevel
+//    กลับลงชีต Product ทีละรายการสินค้า
+// ===============================================
+function updateProductDetails(itemName, floor, location, parLevel) {
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sheet = ss.getSheetByName(PRODUCT_SHEET_NAME);
+    if (!sheet) return false;
+
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    if (lastRow < 2) return false;
+
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    var nameColIndex = headers.indexOf("Product name");
+    if (nameColIndex === -1) nameColIndex = 1;
+
+    // สร้างคอลัมน์ใหม่ถ้ายังไม่มี
+    var floorColIndex    = headers.indexOf("Floor");
+    var locationColIndex = headers.indexOf("Location");
+    var parLevelColIndex = headers.indexOf("Par Level");
+
+    if (floorColIndex === -1) {
+      floorColIndex = lastCol;
+      sheet.getRange(1, lastCol + 1).setValue("Floor");
+      lastCol++;
+    }
+    if (locationColIndex === -1) {
+      locationColIndex = lastCol;
+      sheet.getRange(1, lastCol + 1).setValue("Location");
+      lastCol++;
+    }
+    if (parLevelColIndex === -1) {
+      parLevelColIndex = lastCol;
+      sheet.getRange(1, lastCol + 1).setValue("Par Level");
+      lastCol++;
+    }
+
+    // ค้นหาแถวสินค้าแล้วอัปเดต
+    var nameValues = sheet.getRange(2, nameColIndex + 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < nameValues.length; i++) {
+      if (nameValues[i][0] && nameValues[i][0].toString().trim() === itemName.toString().trim()) {
+        var rowNum = i + 2; // +2 เพราะ header อยู่แถว 1
+        if (floor    !== undefined && floor    !== null) sheet.getRange(rowNum, floorColIndex + 1).setValue(floor);
+        if (location !== undefined && location !== null) sheet.getRange(rowNum, locationColIndex + 1).setValue(location);
+        if (parLevel !== undefined && parLevel !== null && parLevel > 0) sheet.getRange(rowNum, parLevelColIndex + 1).setValue(parseInt(parLevel));
+        return true;
+      }
+    }
+    return false; // ไม่พบสินค้า
+  } catch (error) {
+    Logger.log("Error in updateProductDetails: " + error.toString());
+    return false;
+  }
+}
+
+// ===============================================
+// 6. ฟังก์ชัน (ใหม่) บันทึกผลสำรวจลง SurveyLog
+// ===============================================
+function saveSurveyLog(surveyedBy, floor, items) {
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sheet = ss.getSheetByName(SURVEY_LOG_SHEET_NAME);
+
+    // สร้างชีตใหม่ถ้ายังไม่มี
+    if (!sheet) {
+      sheet = ss.insertSheet(SURVEY_LOG_SHEET_NAME);
+      sheet.getRange(1, 1, 1, 8).setValues([["SurveyDate", "Floor", "ProductName", "CurrentStock", "ParLevel", "NeedToOrder", "Status", "SurveyedBy"]]);
+      sheet.getRange(1, 1, 1, 8).setFontWeight("bold").setBackground("#1a237e").setFontColor("#ffffff");
+    }
+
+    var now = new Date();
+    var dateStr = Utilities.formatDate(now, "Asia/Bangkok", "dd-MM-yyyy / HH:mm น.");
+
+    if (!items || items.length === 0) return true;
+
+    var rows = items.map(function(item) {
+      return [
+        dateStr,
+        floor || "",
+        item.name || item.itemName || "",
+        item.currentStock || 0,
+        item.parLevel || 0,
+        item.needToOrder || 0,
+        item.status || "",
+        surveyedBy || ""
+      ];
+    });
+
+    var lastRow = sheet.getLastRow();
+    sheet.getRange(lastRow + 1, 1, rows.length, 8).setValues(rows);
+    return true;
+  } catch (error) {
+    Logger.log("Error in saveSurveyLog: " + error.toString());
+    return false;
+  }
+}
+
+// ===============================================
+// 7. ฟังก์ชัน (ใหม่) ดึงประวัติสำรวจล่าสุด
+// ===============================================
+function getSurveyLog() {
+  try {
+    var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SURVEY_LOG_SHEET_NAME);
+    if (!sheet || sheet.getLastRow() < 2) return [];
+    var data = sheet.getDataRange().getValues();
+    var result = [];
+    for (var i = 1; i < data.length; i++) {
+      if (!data[i][0]) continue;
+      result.push({
+        surveyDate:   data[i][0],
+        floor:        data[i][1],
+        productName:  data[i][2],
+        currentStock: data[i][3],
+        parLevel:     data[i][4],
+        needToOrder:  data[i][5],
+        status:       data[i][6],
+        surveyedBy:   data[i][7]
+      });
+    }
+    return result.reverse(); // ล่าสุดก่อน
+  } catch (error) {
+    Logger.log("Error in getSurveyLog: " + error.toString());
+    return [];
+  }
+}
+
+// ===============================================
+// 8. ฟังก์ชันจัดการข้อมูลการเบิกย้าย (ชีต เบิกย้ายW1)
+// ===============================================
+function getInventoryData() {
+  try {
+    var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_NAME);
+    if (!sheet) return [];
+    var data = sheet.getDataRange().getValues();
+    var result = [];
+    for (var i = 1; i < data.length; i++) {
+      if (!data[i][0]) continue;
+      result.push({
+        id: data[i][0],
+        timestamp: data[i][1],
+        itemName: data[i][2],
+        requestQty: data[i][3],
+        status: data[i][4],
+        oldExpiry: data[i][5] || 'ไม่ได้ระบุ',
+        newExpiry: data[i][6] || '',
+        receiveQty: data[i][7] === '' ? null : data[i][7],
+        receiveNote: data[i][8] || '',
+        w2Note: data[i][9] || '',
+        storageCapacity: data[i][10] || 0,
+        dispatchTimestamp: data[i][11] || '',
+        requestedBy: data[i][12] || ''
+      });
+    }
+    return result.reverse();
+  } catch (error) { return []; }
+}
+
+function updateInventoryData(items) {
+  try {
+    var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_NAME);
+    if (!sheet) return false;
+    if (sheet.getLastRow() > 1) {
+      sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).clearContent();
+    }
+    if (items && items.length > 0) {
+      var itemsToSave = items.slice().reverse();
+      var rows = itemsToSave.map(function(item) {
+        return [
+          item.id, item.timestamp, item.itemName, item.requestQty,
+          item.status, item.oldExpiry, item.newExpiry, item.receiveQty,
+          item.receiveNote, item.w2Note || '', item.storageCapacity || 0,
+          item.dispatchTimestamp || '', item.requestedBy || ''
+        ];
+      });
+      sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+    }
+    return true;
+  } catch (error) { return false; }
+}
+
+// ===============================================
+// 9. สรุปยอดเติมสินค้าประจำวันและส่งเข้า LINE
+// ===============================================
+function sendDailyStockSummary() {
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sheet = ss.getSheetByName(SURVEY_LOG_SHEET_NAME);
+    if (!sheet || sheet.getLastRow() < 2) {
+      Logger.log("No survey logs found.");
+      return;
+    }
+    
+    var now = new Date();
+    var dayStr = Utilities.formatDate(now, "Asia/Bangkok", "dd-MM");
+    var yearAD = Utilities.formatDate(now, "Asia/Bangkok", "yyyy");
+    var yearBE = String(parseInt(yearAD) + 543);
+    var todayStr = dayStr + "-" + yearBE; // แสดงผลเป็นปี พ.ศ.
+    
+    function isToday(timestamp) {
+      if (!timestamp) return false;
+      var str = String(timestamp);
+      return str.indexOf(dayStr + "-" + yearAD) === 0 || str.indexOf(dayStr + "-" + yearBE) === 0;
+    }
+    
+    var data = sheet.getDataRange().getValues();
+    var locationGroups = {};
+    var totals = {};
+    var hasItems = false;
+    var grandTotal = 0;
+    
+    for (var i = 1; i < data.length; i++) {
+      var surveyDate = data[i][0];
+      if (!isToday(surveyDate)) continue; // ไม่ใช่ของวันนี้
+      
+      var floor = data[i][1];      // โลเคชั่น เช่น "1E"
+      var name = data[i][2];       // ชื่อสินค้า
+      var needToOrder = parseInt(data[i][5]) || 0;
+      
+      if (needToOrder > 0) {
+        hasItems = true;
+        
+        // จัดกลุ่มตามโลเคชั่น
+        if (!locationGroups[floor]) {
+          locationGroups[floor] = {};
+        }
+        if (!locationGroups[floor][name]) {
+          locationGroups[floor][name] = 0;
+        }
+        locationGroups[floor][name] += needToOrder;
+        
+        // ยอดรวมสินค้า
+        if (!totals[name]) {
+          totals[name] = 0;
+        }
+        totals[name] += needToOrder;
+        grandTotal += needToOrder;
+      }
+    }
+    
+    // จัดรูปแบบข้อความส่ง LINE
+    var messageText = "📊 [สรุปยอดจัดเติมสินค้าประจำวัน]\n" +
+      "📅 วันที่: " + todayStr + "\n" +
+      "━━━━━━━━━━━━━━━━━━\n";
+      
+    if (hasItems) {
+      // 1. แยกตามโลเคชั่น
+      for (var loc in locationGroups) {
+        messageText += "📍 โลเคชั่น " + loc + "\n";
+        for (var name in locationGroups[loc]) {
+          var qty = locationGroups[loc][name];
+          var unit = getProductUnit(name);
+          messageText += "  • " + name + ": " + qty + " " + unit + "\n";
+        }
+        messageText += "\n";
+      }
+      
+      // 2. ยอดรวมสินค้าทั้งหมดของวันนี้
+      messageText += "━━━━━━━━━━━━━━━━━━\n";
+      messageText += "📦 ยอดเติมรวมวันนี้: ทั้งหมด " + grandTotal + " ลัง\n";
+    } else {
+      messageText += "✅ วันนี้เช็คสต๊อกแล้วครบถ้วนดี ไม่พบสินค้าขาดแคลน\n";
+    }
+    
+    // 3. ดึงรายการสินค้าค้างส่ง (สั่งเบิกค้างจากวันก่อนๆ ที่ยังไม่ได้รับการจัดส่ง)
+    var allOrders = getInventoryData();
+    var pendingGroup = {};
+    var pendingCount = 0;
+    
+    allOrders.forEach(function(item) {
+      if (item.status === 'สั่งเบิก' && item.timestamp && !isToday(item.timestamp)) {
+        var name = item.itemName;
+        var qty = parseInt(item.requestQty) || 0;
+        if (qty > 0) {
+          if (!pendingGroup[name]) {
+            pendingGroup[name] = 0;
+          }
+          pendingGroup[name] += qty;
+          pendingCount++;
+        }
+      }
+    });
+    
+    if (pendingCount > 0) {
+      messageText += "\n⏳ รายการค้างเบิกสะสม (ที่ยังไม่ได้จัดส่ง):\n";
+      for (var name in pendingGroup) {
+        var qty = pendingGroup[name];
+        var unit = getProductUnit(name);
+        messageText += "  • " + name + ": " + qty + " " + unit + "\n";
+      }
+    }
+    
+    messageText += "━━━━━━━━━━━━━━━━━━\n" +
+      "🤖 รายงานอัตโนมัติจากระบบตรวจสต๊อก TRD";
+      
+    // ส่งไลน์หาห้องแชทกลุ่ม
+    var url = "https://api.line.me/v2/bot/message/push";
+    var payload = { "to": LINE_GROUP_ID, "messages": [{ "type": "text", "text": messageText }] };
+    var options = {
+      "method": "post", "contentType": "application/json",
+      "headers": { "Authorization": "Bearer " + LINE_CHANNEL_TOKEN },
+      "payload": JSON.stringify(payload), "muteHttpExceptions": true
+    };
+    
+    var response = UrlFetchApp.fetch(url, options);
+    Logger.log("LINE Daily Summary Response (" + response.getResponseCode() + "): " + response.getContentText());
+  } catch (error) {
+    Logger.log("Error in sendDailyStockSummary: " + error.toString());
+  }
+}
+
+// ===============================================
+// 10. ฟังก์ชันสำหรับจำลองข้อมูลและรันระบบทดสอบส่งรายงานยอดประจำวัน
+// ===============================================
+function testSendDailyStockSummary() {
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sheet = ss.getSheetByName(SURVEY_LOG_SHEET_NAME);
+    if (!sheet) {
+      Logger.log("ไม่พบชีต SurveyLog");
+      return;
+    }
+    
+    // 1. จำลองข้อมูลบันทึกของวันนี้ลงไปในชีตชั่วคราว
+    var now = new Date();
+    var dateStr = Utilities.formatDate(now, "Asia/Bangkok", "dd-MM-yyyy / HH:mm น."); // รูปแบบวันเวลาปัจจุบัน
+    
+    var mockData = [
+      [dateStr, "1E", "แป้งเค้กพัดโบก 1kg", 5, 25, 20, "ส่งเบิก", "แอดมินจำลอง"],
+      [dateStr, "1E", "แป้งเอนกประสงค์ตราเชอร์รี่ฟ้า", 10, 40, 30, "ส่งเบิก", "แอดมินจำลอง"],
+      [dateStr, "2A", "วิปปิ้งครีมริชส์", 2, 20, 18, "ส่งเบิก", "แอดมินจำลอง"],
+      [dateStr, "2A", "นมข้นหวานมะลิ 2kg", 15, 65, 50, "ส่งเบิก", "แอดมินจำลอง"]
+    ];
+    
+    var lastRow = sheet.getLastRow();
+    sheet.getRange(lastRow + 1, 1, mockData.length, 8).setValues(mockData);
+    Logger.log("เพิ่มข้อมูลทดลองเรียบร้อยในชีต SurveyLog แถวที่ " + (lastRow + 1) + " ถึง " + (lastRow + mockData.length));
+    
+    // 2. เรียกใช้ฟังก์ชันจริงเพื่อคำนวณและสรุปส่ง LINE
+    Logger.log("กำลังเรียกใช้งาน sendDailyStockSummary()...");
+    sendDailyStockSummary();
+    
+    // 3. ลบข้อมูลจำลองออกทันทีหลังทดสอบเสร็จ เพื่อไม่ให้มีข้อมูลขยะในชีต
+    sheet.deleteRows(lastRow + 1, mockData.length);
+    Logger.log("ลบข้อมูลจำลองชั่วคราวเรียบร้อยแล้ว");
+    
+  } catch (e) {
+    Logger.log("เกิดข้อผิดพลาดในการรันเทส: " + e.toString());
+  }
+}
