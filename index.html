@@ -74,6 +74,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
+        const CURRENT_VERSION = "20260602.01";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -2237,8 +2238,31 @@
         // ==========================================
         // 6. INITIALIZATION
         // ==========================================
-        window.onload = function() {
-            ssoInit();
+        async function checkAppVersion() {
+            try {
+                const res = await fetch('version.json?t=' + Date.now());
+                if (!res.ok) return true;
+                const config = await res.json();
+                if (config && config.version && config.version !== CURRENT_VERSION) {
+                    showLoading('พบเวอร์ชันใหม่ กำลังอัปเดตระบบ...');
+                    setTimeout(() => {
+                        const url = new URL(window.location.href);
+                        url.searchParams.set('update', Date.now());
+                        window.location.replace(url.toString());
+                    }, 800);
+                    return false;
+                }
+            } catch (e) {
+                console.warn('Version check skipped:', e);
+            }
+            return true;
+        }
+
+        window.onload = async function() {
+            const isVersionOk = await checkAppVersion();
+            if (isVersionOk) {
+                ssoInit();
+            }
         };
 
     </script>
