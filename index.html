@@ -198,8 +198,8 @@
             surveyConfirmList: [], // รายการที่จะเบิก
             surveyView: 'floors',  // 'floors' | 'list' | 'confirm'
             // Location Manager State
-            locationTab: 'missing',   // 'missing' | 'all'
             locationSearch: '',
+            locationShowAll: false,
             locationEdits: {}         // { productName: { floor, location } }
         };
 
@@ -461,8 +461,8 @@
                 state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' }];
             }
             if (viewName === 'location') {
-                state.locationTab = 'missing';
                 state.locationSearch = '';
+                state.locationShowAll = false;
                 state.locationEdits = {};
             }
             if (viewName === 'survey') {
@@ -1541,6 +1541,61 @@
         }
 
         // ── Render: Location Manager ──
+        function renderLocationRow(prod) {
+            const edit = state.locationEdits[prod.name] || {};
+            const currentFloor    = edit.floor    !== undefined ? edit.floor    : (prod.floor    || '');
+            const currentLocation = edit.location !== undefined ? edit.location : (prod.location || '');
+            const hasPending = !!state.locationEdits[prod.name];
+            const isMissing  = !prod.floor;
+            const enc = encodeURIComponent(prod.name);
+            const borderClass = hasPending
+                ? 'border-brand-blue border-2'
+                : isMissing ? 'border-rose-200' : 'border-slate-100';
+            return `
+                <div class="bg-white p-4 rounded-2xl ${borderClass} border shadow-sm mb-3">
+                    <div class="flex items-start justify-between gap-2 mb-3">
+                        <h3 class="font-bold text-brand-blue text-sm leading-snug flex-1">${prod.name}</h3>
+                        ${isMissing && !hasPending ? '<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-500 border border-rose-200 flex-shrink-0">ไม่มีโลเคชั่น</span>' : ''}
+                        ${hasPending ? '<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-brand-blue/10 text-brand-blue border border-brand-blue/20 flex-shrink-0">✏️ รอบันทึก</span>' : ''}
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-1">📍 ชั้น</label>
+                            <select onchange="updateLocationEdit(decodeURIComponent('${enc}'), 'floor', this.value)"
+                                class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
+                                <option value="" ${!currentFloor ? 'selected' : ''}>-- เลือก --</option>
+                                ${['1','2','3','4','5'].map(f => `<option value="${f}" ${currentFloor === f ? 'selected' : ''}>ชั้น ${f}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-1">📍 โลเคชั่น</label>
+                            <input type="text" value="${currentLocation}" placeholder="เช่น A-01-1"
+                                oninput="updateLocationEdit(decodeURIComponent('${enc}'), 'location', this.value)"
+                                class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        function updateLocationSearch(value) {
+            state.locationSearch = value;
+            const search = value.toLowerCase().trim();
+            // When searching: scan all products. When empty: show missing only (up to 20).
+            const filtered = search
+                ? state.products.filter(p => p.name.toLowerCase().includes(search))
+                : state.products.filter(p => !p.floor).slice(0, 20);
+            const listEl = document.getElementById('location-list');
+            if (!listEl) return;
+            if (filtered.length === 0) {
+                listEl.innerHTML = `<div class="flex flex-col items-center justify-center py-16 text-slate-400">
+                    <span class="material-icons-round text-[40px] mb-2">check_circle_outline</span>
+                    <p class="text-sm font-medium">${search ? 'ไม่พบสินค้าที่ค้นหา' : 'สินค้าทุกรายการมีโลเคชั่นแล้ว 🎉'}</p>
+                </div>`;
+            } else {
+                listEl.innerHTML = filtered.map(renderLocationRow).join('');
+            }
+        }
+
         function updateLocationEdit(productName, field, value) {
             if (!state.locationEdits[productName]) {
                 const existing = state.products.find(p => p.name === productName) || {};
@@ -1602,61 +1657,30 @@
         }
 
         function renderLocationManager() {
-            const assigned = state.products.filter(p => p.floor).length;
-            const total = state.products.length;
-            const pct = total > 0 ? Math.round(assigned / total * 100) : 0;
-
-            const tab = state.locationTab;
             const search = (state.locationSearch || '').toLowerCase().trim();
-
-            const baseList = tab === 'missing'
-                ? state.products.filter(p => !p.floor)
-                : state.products;
-            const filtered = search
-                ? baseList.filter(p => p.name.toLowerCase().includes(search))
-                : baseList;
-
+            const missingList = state.products.filter(p => !p.floor);
+            const missingCount = missingList.length;
             const editCount = Object.keys(state.locationEdits).length;
 
-            const rows = filtered.map(prod => {
-                const edit = state.locationEdits[prod.name] || {};
-                const currentFloor    = edit.floor    !== undefined ? edit.floor    : (prod.floor    || '');
-                const currentLocation = edit.location !== undefined ? edit.location : (prod.location || '');
-                const hasPending = !!state.locationEdits[prod.name];
-                const isMissing  = !prod.floor;
-                const enc = encodeURIComponent(prod.name);
+            // What to show in the list
+            let displayList;
+            let showAllBtn = '';
+            if (search) {
+                displayList = state.products.filter(p => p.name.toLowerCase().includes(search));
+            } else if (state.locationShowAll) {
+                displayList = state.products;
+            } else {
+                displayList = missingList.slice(0, 20);
+                if (missingCount > 20 || state.products.length > 0) {
+                    showAllBtn = `
+                        <button onclick="state.locationShowAll=true; render()" class="w-full mt-2 py-3 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-500 hover:bg-slate-50 transition-all flex items-center justify-center gap-2">
+                            <span class="material-icons-round text-[16px]">list</span>
+                            ดูสินค้าทั้งหมด ${state.products.length} รายการ
+                        </button>`;
+                }
+            }
 
-                const borderClass = hasPending
-                    ? 'border-brand-blue border-2'
-                    : isMissing
-                        ? 'border-rose-200'
-                        : 'border-slate-100';
-
-                return `
-                    <div class="bg-white p-4 rounded-2xl ${borderClass} border shadow-sm mb-3">
-                        <div class="flex items-start justify-between gap-2 mb-3">
-                            <h3 class="font-bold text-brand-blue text-sm leading-snug flex-1">${prod.name}</h3>
-                            ${isMissing && !hasPending ? '<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-500 border border-rose-200 flex-shrink-0">ไม่มีโลเคชั่น</span>' : ''}
-                            ${hasPending ? '<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-brand-blue/10 text-brand-blue border border-brand-blue/20 flex-shrink-0">✏️ รอบันทึก</span>' : ''}
-                        </div>
-                        <div class="grid grid-cols-2 gap-3">
-                            <div>
-                                <label class="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-1">📍 ชั้น</label>
-                                <select onchange="updateLocationEdit(decodeURIComponent('${enc}'), 'floor', this.value)"
-                                    class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
-                                    <option value="" ${!currentFloor ? 'selected' : ''}>-- เลือก --</option>
-                                    ${['1','2','3','4','5'].map(f => `<option value="${f}" ${currentFloor === f ? 'selected' : ''}>ชั้น ${f}</option>`).join('')}
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-1">📍 โลเคชั่น</label>
-                                <input type="text" value="${currentLocation}" placeholder="เช่น A-01-1"
-                                    oninput="updateLocationEdit(decodeURIComponent('${enc}'), 'location', this.value)"
-                                    class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
-                            </div>
-                        </div>
-                    </div>`;
-            }).join('');
+            const rows = displayList.map(renderLocationRow).join('');
 
             return `
                 <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative animate-fade-in">
@@ -1674,38 +1698,26 @@
                         </button>
                     </header>
 
-                    <div class="flex bg-white shadow-sm sticky top-[60px] z-10 border-b border-slate-100 px-2">
-                        <button onclick="state.locationTab='missing'; render()" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] transition-all ${tab === 'missing' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400 hover:text-slate-600'}">
-                            ยังไม่มีโลเคชั่น ${state.products.filter(p => !p.floor).length > 0 ? `<span class="ml-1 text-[10px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded-full">${state.products.filter(p => !p.floor).length}</span>` : ''}
-                        </button>
-                        <button onclick="state.locationTab='all'; render()" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] transition-all ${tab === 'all' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400 hover:text-slate-600'}">
-                            ทั้งหมด
-                        </button>
+                    <div class="p-4 bg-white border-b border-slate-100 sticky top-[60px] z-10 shadow-sm">
+                        <input type="text" value="${state.locationSearch}" placeholder="🔍 ค้นหาชื่อสินค้าที่ต้องการระบุโลเคชั่น..."
+                            oninput="updateLocationSearch(this.value)"
+                            class="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:border-brand-blue focus:bg-white transition-all">
                     </div>
 
-                    <div class="bg-white px-4 py-3 border-b border-slate-100">
-                        <div class="flex justify-between text-[11px] text-slate-500 mb-1.5">
-                            <span>ระบุโลเคชั่นแล้ว <span class="font-bold text-emerald-600">${assigned}</span> / ${total} รายการ</span>
-                            <span class="font-bold ${pct >= 90 ? 'text-emerald-600' : pct >= 50 ? 'text-amber-500' : 'text-rose-500'}">${pct}%</span>
-                        </div>
-                        <div class="w-full bg-slate-100 rounded-full h-2">
-                            <div class="h-2 rounded-full transition-all ${pct >= 90 ? 'bg-emerald-500' : pct >= 50 ? 'bg-amber-400' : 'bg-rose-400'}" style="width:${pct}%"></div>
-                        </div>
-                    </div>
-
-                    <div class="bg-white px-4 py-2.5 border-b border-slate-100">
-                        <input type="text" value="${state.locationSearch}" placeholder="🔍 ค้นหาชื่อสินค้า..."
-                            oninput="state.locationSearch = this.value; render()"
-                            class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
-                    </div>
-
-                    <main class="flex-1 overflow-y-auto p-4 ${editCount > 0 ? 'pb-36' : 'pb-6'} animate-fade-in">
-                        ${filtered.length === 0
+                    <main id="location-list" class="flex-1 overflow-y-auto p-4 ${editCount > 0 ? 'pb-36' : 'pb-6'}">
+                        ${!search && !state.locationShowAll ? `
+                            <p class="text-[11px] text-slate-400 font-medium mb-3 px-1">
+                                ⚠️ สินค้าที่ยังไม่มีโลเคชั่น
+                                <span class="font-bold text-rose-500">${missingCount} รายการ</span>
+                                ${missingCount > 20 ? `<span class="text-slate-300">· แสดง 20 รายการแรก</span>` : ''}
+                            </p>` : ''}
+                        ${search ? `<p class="text-[11px] text-slate-400 font-medium mb-3 px-1">ผลการค้นหา <span class="font-bold text-brand-blue">${displayList.length} รายการ</span></p>` : ''}
+                        ${displayList.length === 0
                             ? `<div class="flex flex-col items-center justify-center py-16 text-slate-400">
                                 <span class="material-icons-round text-[40px] mb-2">check_circle_outline</span>
-                                <p class="text-sm font-medium">${tab === 'missing' ? 'สินค้าทุกรายการมีโลเคชั่นแล้ว 🎉' : 'ไม่พบสินค้าที่ค้นหา'}</p>
+                                <p class="text-sm font-medium">${search ? 'ไม่พบสินค้าที่ค้นหา' : 'สินค้าทุกรายการมีโลเคชั่นแล้ว 🎉'}</p>
                                </div>`
-                            : rows}
+                            : rows + showAllBtn}
                     </main>
 
                     ${editCount > 0 ? `
