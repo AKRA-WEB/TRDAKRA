@@ -94,6 +94,16 @@
 
         // ฟังก์ชัน verify token + init app — เรียกใน window.onload
         async function ssoInit() {
+            // ── DEV BYPASS: localhost หรือ ?demo=1 → ข้าม SSO ──
+            const isLocalhost = ['localhost', '127.0.0.1'].includes(location.hostname);
+            const isDemoMode  = new URLSearchParams(location.search).get('demo') === '1';
+            if (isLocalhost || isDemoMode) {
+                currentUser = 'ทดสอบระบบ';
+                showLoading('กำลังโหลดข้อมูล (Demo Mode)...');
+                fetchInitialData();
+                return;
+            }
+            // ────────────────────────────────────────────────────
             const urlParams = new URLSearchParams(window.location.search);
             const ssoToken  = urlParams.get('sso');
 
@@ -172,16 +182,21 @@
         // ==========================================
         // 1. CONFIGURATION & STATE
         // ==========================================
-        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxsopKZ59Wd6GuJrgeFTM08QceK28_DPbuysKv8pvcpqDMSXgKU0iogaq5hREp_KA/exec';
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby9dVC3Vl7znw-PZ6Wi72sOlnleWzEp3NOVpDALoS2pg8Juq-pzWdXXwjQO0JPcj6M/exec';
         let state = {
-            view: 'home', 
-            w1Tab: 'request', 
-            w2Tab: 'tasks', 
-            dashboardFilter: 'week', 
-            selectedReceiveId: null, 
-            items: [], 
-            products: [], 
-            w1Rows: [{ itemName: '', qty: '', storageCapacity: '', oldExpiry: '', unit: '' }] 
+            view: 'home',
+            w1Tab: 'request',
+            w2Tab: 'tasks',
+            dashboardFilter: 'week',
+            selectedReceiveId: null,
+            items: [],
+            products: [],
+            w1Rows: [{ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' }],
+            // Survey State
+            surveyFloor: null,
+            surveyData: {},       // { itemName: { currentStock, parLevel } }
+            surveyConfirmList: [], // รายการที่จะเบิก
+            surveyView: 'floors'  // 'floors' | 'list' | 'confirm'
         };
 
         function showLoading(text = 'กำลังทำงาน...') {
@@ -277,16 +292,56 @@
         function getCache(key, ttlMs) { try { const raw = localStorage.getItem(key); if (!raw) return null; const w = JSON.parse(raw); if (Date.now() - (w._ts||0) > ttlMs) { localStorage.removeItem(key); return null; } return w._d; } catch(e) { localStorage.removeItem(key); return null; } }
         function setCache(key, data) { localStorage.setItem(key, JSON.stringify({ _ts: Date.now(), _d: data })); }
         function mapItemData(item) {
-            return { 
-                ...item, 
-                rawDate: parseCustomDate(item.timestamp), 
-                timestamp: String(item.timestamp).includes('/') ? item.timestamp : formatDateTime(item.timestamp), 
+            return {
+                ...item,
+                rawDate: parseCustomDate(item.timestamp),
+                timestamp: String(item.timestamp).includes('/') ? item.timestamp : formatDateTime(item.timestamp),
                 dispatchTimestamp: item.dispatchTimestamp ? (String(item.dispatchTimestamp).includes('/') ? item.dispatchTimestamp : formatDateTime(item.dispatchTimestamp)) : '',
                 requestedBy: item.requestedBy || '',
-                oldExpiry: formatExpiryDate(item.oldExpiry), 
-                newExpiry: formatExpiryDate(item.newExpiry), 
-                storageCapacity: parseInt(item.currentStock || item.storageCapacity) || 0 
+                oldExpiry: formatExpiryDate(item.oldExpiry),
+                newExpiry: formatExpiryDate(item.newExpiry),
+                storageCapacity: parseInt(item.currentStock || item.storageCapacity) || 0
             };
+        }
+
+        // ── ดึงข้อมูล floor/location/parLevel ของสินค้าจาก state.products ──
+        function getProductDetails(itemName) {
+            if (!itemName) return { floor: '', location: '', parLevel: 0 };
+            const prod = state.products.find(p => (p.name || '').trim() === itemName.trim());
+            if (!prod) return { floor: '', location: '', parLevel: 0 };
+            return { floor: prod.floor || '', location: prod.location || '', parLevel: prod.parLevel || 0 };
+        }
+
+        // ── บันทึก Floor/Location/ParLevel กลับ Google Sheet ──
+        async function pushProductDetails(itemName, floor, location, parLevel) {
+            if (!itemName || (!floor && !location && !parLevel)) return;
+            try {
+                await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify({ action: 'updateProductDetails', name: itemName, floor, location, parLevel: parseInt(parLevel) || 0 })
+                });
+                // อัปเดต state.products ด้วย ไม่ต้อง reload
+                const idx = state.products.findIndex(p => (p.name || '').trim() === itemName.trim());
+                if (idx !== -1) {
+                    if (floor)    state.products[idx].floor    = floor;
+                    if (location) state.products[idx].location = location;
+                    if (parLevel) state.products[idx].parLevel = parseInt(parLevel) || 0;
+                }
+            } catch (err) { console.error('pushProductDetails error', err); }
+        }
+
+        // ── Logic คำนวณสถานะสต๊อก ──
+        function getStockStatus(currentStock, parLevel) {
+            const cur = parseInt(currentStock) || 0;
+            const par = parseInt(parLevel) || 0;
+            if (par === 0) return { status: 'no-par', label: '❓ ยังไม่ตั้ง Par', color: 'text-slate-400', bg: 'bg-slate-50', border: 'border-slate-200', needOrder: 0, dot: 'bg-slate-300' };
+            const ratio = cur / par;
+            const need = Math.max(0, par - cur);
+            if (cur === 0)    return { status: 'empty',    label: '❌ หมด!',     color: 'text-rose-600',   bg: 'bg-rose-50',   border: 'border-rose-200',   needOrder: need, dot: 'bg-rose-500' };
+            if (ratio < 0.3)  return { status: 'critical', label: '🔴 ใกล้หมด', color: 'text-rose-600',   bg: 'bg-rose-50',   border: 'border-rose-200',   needOrder: need, dot: 'bg-rose-500' };
+            if (ratio < 1.0)  return { status: 'low',      label: '⚠️ น้อย',    color: 'text-amber-600',  bg: 'bg-amber-50',  border: 'border-amber-200',  needOrder: need, dot: 'bg-amber-400' };
+            return              { status: 'ok',       label: '✅ พอแล้ว',  color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', needOrder: 0,    dot: 'bg-emerald-400' };
         }
         function getProductUnitClient(itemName) {
             if (!itemName) return 'หน่วย';
@@ -381,26 +436,37 @@
         function selectProduct(name, unit, index) {
             updateW1RowValue(index, 'itemName', name);
             updateW1RowValue(index, 'unit', unit);
+            // Auto-fill floor/location/parLevel จาก Product Sheet
+            const details = getProductDetails(name);
+            if (details.floor)    updateW1RowValue(index, 'floor', details.floor);
+            if (details.location) updateW1RowValue(index, 'location', details.location);
+            if (details.parLevel) updateW1RowValue(index, 'parLevel', details.parLevel);
             render();
         }
 
         // ==========================================
         // 4. ACTION HANDLERS
         // ==========================================
-        function setView(viewName) { 
-            state.view = viewName; 
-            state.selectedReceiveId = null; 
+        function setView(viewName) {
+            state.view = viewName;
+            state.selectedReceiveId = null;
             if (viewName === 'w1') {
-                state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', oldExpiry: '', unit: '' }];
+                state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' }];
             }
-            render(); 
+            if (viewName === 'survey') {
+                state.surveyView = 'floors';
+                state.surveyFloor = null;
+                state.surveyData = {};
+                state.surveyConfirmList = [];
+            }
+            render();
         }
         function setW1Tab(tabName) { state.w1Tab = tabName; state.selectedReceiveId = null; render(); }
         function setW2Tab(tabName) { state.w2Tab = tabName; state.selectedReceiveId = null; render(); }
         function setDashboardFilter(val) { state.dashboardFilter = val; render(); }
 
         function addW1Row() {
-            state.w1Rows.push({ itemName: '', qty: '', storageCapacity: '', oldExpiry: '', unit: '' });
+            state.w1Rows.push({ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' });
             render();
         }
 
@@ -466,22 +532,27 @@
                 timestamp: timestamp,
                 itemName: row.itemName,
                 requestQty: parseInt(row.qty),
-                storageCapacity: row.storageCapacity ? parseInt(row.storageCapacity) : 0,
+                storageCapacity: row.parLevel ? parseInt(row.parLevel) : (row.storageCapacity ? parseInt(row.storageCapacity) : 0),
                 status: 'สั่งเบิก',
                 oldExpiry: row.oldExpiry ? convertToCE(row.oldExpiry) : 'ไม่ได้ระบุ',
                 newExpiry: '', receiveQty: null, receiveNote: '', w2Note: '',
                 requestedBy: currentUser || 'ไม่ทราบ'
             }));
 
-            // Prepend all new items to the global items list
             state.items = [...newItems, ...state.items];
-            
-            // Reset rows and switch tab
-            state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', oldExpiry: '', unit: '' }];
+            state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' }];
             state.w1Tab = 'pending';
             render();
 
             await syncDataToSheet();
+
+            // อัปเดต Floor/Location/ParLevel กลับ Product Sheet
+            for (const row of validRows) {
+                if (row.itemName && (row.floor || row.location || row.parLevel)) {
+                    pushProductDetails(row.itemName, row.floor, row.location, row.parLevel);
+                }
+            }
+
             hideLoading();
             alert(`ส่งคำขอเบิกสินค้า ${newItems.length} รายการเรียบร้อยแล้ว!`);
             sendAppLog("สั่งเบิกสินค้า Bulk (TRD)", `เบิกรวม ${newItems.length} รายการ`);
@@ -566,6 +637,123 @@
             render();
             await syncDataToSheet();
             sendAppLog("เปลี่ยนสถานะ (AKRA)", `สถานะ: ${newStatus} (${targetItemName}) หมายเหตุ: ${w2NoteValue}`);
+        }
+
+        // ==========================================
+        // 4b. SURVEY ACTION HANDLERS
+        // ==========================================
+        function setSurveyFloor(floor) {
+            state.surveyFloor = floor;
+            state.surveyView = 'list';
+            render();
+        }
+
+        function updateSurveyData(itemName, field, value) {
+            if (!state.surveyData[itemName]) state.surveyData[itemName] = { currentStock: '', parLevel: '' };
+            state.surveyData[itemName][field] = value;
+            // Real-time re-render สรุปท้ายหน้า
+            const summaryEl = document.getElementById('survey-summary');
+            if (summaryEl) {
+                const list = buildSurveyOrderList();
+                summaryEl.innerHTML = renderSurveySummaryBar(list);
+            }
+        }
+
+        function buildSurveyOrderList() {
+            const floorProducts = state.products.filter(p => p.floor === state.surveyFloor);
+            const orderList = [];
+            for (const prod of floorProducts) {
+                const data = state.surveyData[prod.name] || {};
+                const cur = parseInt(data.currentStock);
+                const par = parseInt(data.parLevel) || prod.parLevel || 0;
+                if (isNaN(cur) || par === 0) continue;
+                const st = getStockStatus(cur, par);
+                if (st.needOrder > 0) {
+                    orderList.push({ name: prod.name, unit: prod.unit, needOrder: st.needOrder, status: st.status, parLevel: par });
+                }
+            }
+            return orderList;
+        }
+
+        function renderSurveySummaryBar(list) {
+            if (list.length === 0) {
+                return `<div class="text-center text-slate-400 text-xs py-2">✅ ยังไม่พบรายการที่ต้องเบิก</div>`;
+            }
+            const criticalCount = list.filter(i => i.status === 'critical' || i.status === 'empty').length;
+            return `
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-bold text-brand-blue">ต้องเบิก <span class="text-brand-orange">${list.length} รายการ</span></p>
+                        ${criticalCount > 0 ? `<p class="text-[10px] text-rose-500 font-semibold">🔴 ด่วน ${criticalCount} รายการ</p>` : ''}
+                    </div>
+                    <button onclick="openSurveyConfirm()" class="bg-brand-orange text-white text-xs font-bold px-4 py-2 rounded-xl shadow shadow-brand-orange/30 active:scale-95 transition-all">
+                        📤 เบิกทั้งหมด
+                    </button>
+                </div>`;
+        }
+
+        function openSurveyConfirm() {
+            const list = buildSurveyOrderList();
+            if (list.length === 0) { alert('ยังไม่มีรายการที่ต้องเบิก'); return; }
+            state.surveyConfirmList = list;
+            state.surveyView = 'confirm';
+            render();
+        }
+
+        async function handleSurveyBulkOrder() {
+            const list = state.surveyConfirmList;
+            if (!list || list.length === 0) return;
+            showLoading('กำลังส่งรายการเบิก...');
+
+            const now = new Date();
+            const timestamp = formatDateTime(now.toISOString());
+            const newItems = list.map(item => ({
+                id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
+                rawDate: now,
+                timestamp,
+                itemName: item.name,
+                requestQty: item.needOrder,
+                storageCapacity: item.parLevel || 0,
+                status: 'สั่งเบิก',
+                oldExpiry: 'ไม่ได้ระบุ',
+                newExpiry: '', receiveQty: null, receiveNote: '', w2Note: '',
+                requestedBy: currentUser || 'ไม่ทราบ'
+            }));
+
+            state.items = [...newItems, ...state.items];
+            render();
+            await syncDataToSheet();
+
+            // บันทึก SurveyLog
+            const logItems = list.map(item => {
+                const data = state.surveyData[item.name] || {};
+                return { name: item.name, currentStock: parseInt(data.currentStock) || 0, parLevel: item.parLevel, needToOrder: item.needOrder, status: item.status };
+            });
+            try {
+                await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify({ action: 'saveSurveyLog', surveyedBy: currentUser || 'ไม่ทราบ', floor: state.surveyFloor, items: logItems })
+                });
+            } catch(e) { console.error('SurveyLog error', e); }
+
+            // อัปเดต ParLevel กลับ Product Sheet
+            for (const prod of state.products.filter(p => p.floor === state.surveyFloor)) {
+                const data = state.surveyData[prod.name] || {};
+                const par = parseInt(data.parLevel) || 0;
+                if (par > 0 && par !== prod.parLevel) {
+                    pushProductDetails(prod.name, prod.floor, prod.location, par);
+                }
+            }
+
+            hideLoading();
+            alert(`✅ ส่งเบิกสำเร็จ ${newItems.length} รายการ จากชั้น ${state.surveyFloor}`);
+            sendAppLog('สำรวจสต๊อก+เบิก (Survey)', `ชั้น ${state.surveyFloor}: เบิก ${newItems.length} รายการ`);
+            state.surveyView = 'floors';
+            state.surveyFloor = null;
+            state.surveyData = {};
+            state.surveyConfirmList = [];
+            render();
         }
 
         // ==========================================
@@ -853,6 +1041,163 @@
             `;
         }
 
+        // ── Render: Survey Tab (สำรวจสต๊อก) ──
+        function renderSurvey() {
+            // ─── หน้า Floor Selector ───
+            if (state.surveyView === 'floors') {
+                const floors = {};
+                state.products.forEach(p => {
+                    const f = p.floor || '❓ ยังไม่ระบุชั้น';
+                    if (!floors[f]) floors[f] = { total: 0, needOrder: 0, nopar: 0 };
+                    floors[f].total++;
+                    if (!p.parLevel) floors[f].nopar++;
+                });
+                const totalInSystem = state.products.length;
+                const totalWithFloor = state.products.filter(p => p.floor).length;
+
+                const floorCards = Object.keys(floors).sort().map(f => {
+                    const isUnassigned = f === '❓ ยังไม่ระบุชั้น';
+                    return `
+                        <button onclick="${isUnassigned ? '' : `setSurveyFloor('${f}')`}" ${isUnassigned ? 'disabled' : ''}
+                            class="bg-white rounded-2xl p-4 shadow-sm border ${isUnassigned ? 'border-slate-100 opacity-60 cursor-not-allowed' : 'border-slate-100 hover:border-brand-blue hover:shadow-md active:scale-95'} transition-all text-left">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-lg font-bold ${isUnassigned ? 'text-slate-400' : 'text-brand-blue'}">🏠 ${f}</span>
+                                <span class="material-icons-round text-slate-300 text-[18px]">${isUnassigned ? 'lock' : 'chevron_right'}</span>
+                            </div>
+                            <p class="text-[11px] text-slate-500 font-medium">${floors[f].total} รายการ${floors[f].nopar > 0 ? ` • <span class="text-amber-500">${floors[f].nopar} ยังไม่ตั้ง Par</span>` : ''}</p>
+                        </button>`;
+                }).join('');
+
+                return `
+                    <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col">
+                        <header class="bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
+                            <div class="flex items-center gap-2">
+                                <button onclick="setView('w1')" class="p-1.5 rounded-full hover:bg-black/10 transition-colors"><span class="material-icons-round">arrow_back</span></button>
+                                <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">search</span> สำรวจสต๊อกหน้าร้าน</h1>
+                            </div>
+                            <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors"><span class="material-icons-round text-[20px]">refresh</span></button>
+                        </header>
+                        <main class="flex-1 overflow-y-auto p-5 pb-24 space-y-4 animate-fade-in">
+                            <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                                <p class="text-[11px] text-slate-500">สินค้าในระบบ <span class="font-bold text-brand-blue">${totalInSystem}</span> รายการ • ระบุชั้นแล้ว <span class="font-bold text-emerald-600">${totalWithFloor}</span> รายการ</p>
+                                <p class="text-[10px] text-slate-400 mt-1">💡 เบิกสินค้าพร้อมกรอก Floor/Location เพื่อให้ข้อมูลครบ</p>
+                            </div>
+                            <h2 class="text-sm font-bold text-brand-blue px-1">เลือกชั้นที่จะสำรวจ</h2>
+                            <div class="grid grid-cols-2 gap-3">${floorCards || '<p class="col-span-2 text-center text-slate-400 text-sm py-8">ยังไม่มีข้อมูลชั้น<br>กรุณาเบิกสินค้าพร้อมระบุ Floor ก่อน</p>'}</div>
+                        </main>
+                    </div>`;
+            }
+
+            // ─── หน้า Survey List ───
+            if (state.surveyView === 'list') {
+                const floorProducts = state.products.filter(p => p.floor === state.surveyFloor);
+                const surveyFilterEl = () => {
+                    try { return document.getElementById('survey-filter') ? document.getElementById('survey-filter').value : 'all'; } catch(e) { return 'all'; }
+                };
+
+                const rows = floorProducts.map(prod => {
+                    const data = state.surveyData[prod.name] || {};
+                    const cur = data.currentStock !== undefined ? data.currentStock : '';
+                    const par = data.parLevel !== undefined ? data.parLevel : (prod.parLevel || '');
+                    const st = (cur !== '' && par !== '') ? getStockStatus(cur, par) : null;
+                    const encodedName = encodeURIComponent(prod.name);
+
+                    return `
+                        <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3" id="survey-row-${encodedName}">
+                            <div class="flex items-start justify-between gap-2">
+                                <div class="flex-1 min-w-0">
+                                    <h3 class="font-bold text-brand-blue text-sm leading-snug truncate">${prod.name}</h3>
+                                    ${prod.location ? `<p class="text-[10px] text-slate-400 mt-0.5 flex items-center gap-0.5"><span class="material-icons-round text-[12px]">place</span>${prod.location}</p>` : ''}
+                                </div>
+                                ${st ? `<span class="text-[10px] font-bold px-2 py-1 rounded-full border ${st.bg} ${st.color} ${st.border} flex-shrink-0">${st.label}</span>` : ''}
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1">มีอยู่จริง (${prod.unit || 'หน่วย'})</label>
+                                    <input type="number" min="0" value="${cur}" placeholder="0"
+                                        oninput="updateSurveyData(decodeURIComponent('${encodedName}'), 'currentStock', this.value)"
+                                        class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-brand-blue text-sm font-bold text-center transition-all">
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1">Par Level (${prod.unit || 'หน่วย'})</label>
+                                    <input type="number" min="0" value="${par}" placeholder="ตั้งค่า"
+                                        oninput="updateSurveyData(decodeURIComponent('${encodedName}'), 'parLevel', this.value)"
+                                        class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-brand-orange text-sm font-bold text-center transition-all">
+                                </div>
+                            </div>
+                            ${st && st.needOrder > 0 ? `
+                                <div class="flex items-center justify-between ${st.bg} ${st.border} border rounded-xl px-3 py-2">
+                                    <span class="text-[11px] font-semibold ${st.color}">ต้องเบิกเพิ่ม</span>
+                                    <span class="text-base font-extrabold ${st.color}">${st.needOrder} ${prod.unit || 'หน่วย'}</span>
+                                </div>` : ''}
+                        </div>`;
+                }).join('');
+
+                const orderList = buildSurveyOrderList();
+                return `
+                    <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col">
+                        <header class="bg-brand-blue text-white p-4 flex items-center gap-2 sticky top-0 z-20 shadow-md">
+                            <button onclick="state.surveyView='floors'; render()" class="p-1.5 rounded-full hover:bg-black/10 transition-colors"><span class="material-icons-round">arrow_back</span></button>
+                            <div class="flex-1">
+                                <h1 class="text-[16px] font-bold">🏠 ${state.surveyFloor}</h1>
+                                <p class="text-[11px] text-white/70">${floorProducts.length} รายการ</p>
+                            </div>
+                        </header>
+                        <div class="bg-white px-4 py-3 sticky top-[68px] z-10 border-b border-slate-100 shadow-sm">
+                            <input type="text" id="survey-search" placeholder="🔍 ค้นหาชื่อสินค้า..."
+                                oninput="renderSurveyListFilter()"
+                                class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
+                        </div>
+                        <main class="flex-1 overflow-y-auto p-4 pb-36 space-y-3 animate-fade-in" id="survey-list-main">
+                            ${floorProducts.length === 0 ? `<div class="text-center text-slate-400 text-sm py-16">ไม่มีสินค้าในชั้นนี้</div>` : rows}
+                        </main>
+                        <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-100 p-4 shadow-2xl" id="survey-summary">
+                            ${renderSurveySummaryBar(orderList)}
+                        </div>
+                    </div>`;
+            }
+
+            // ─── หน้า Confirm ───
+            if (state.surveyView === 'confirm') {
+                const list = state.surveyConfirmList;
+                const criticalItems = list.filter(i => i.status === 'critical' || i.status === 'empty');
+                const lowItems     = list.filter(i => i.status === 'low');
+                const renderGroup = (items, label, colorClass) => items.length === 0 ? '' : `
+                    <div>
+                        <p class="text-[10px] font-bold uppercase tracking-wider ${colorClass} mb-2 px-1">${label} (${items.length})</p>
+                        <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                            ${items.map(i => `
+                                <div class="flex items-center justify-between p-3.5 border-b border-slate-50 last:border-0">
+                                    <div class="flex-1 min-w-0 pr-3">
+                                        <p class="text-sm font-semibold text-brand-blue truncate">${i.name}</p>
+                                    </div>
+                                    <span class="font-extrabold ${colorClass} text-base">${i.needOrder} <span class="text-[10px] font-medium">${i.unit || 'หน่วย'}</span></span>
+                                </div>`).join('')}
+                        </div>
+                    </div>`;
+                return `
+                    <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col">
+                        <header class="bg-brand-blue text-white p-4 flex items-center gap-2 sticky top-0 z-20 shadow-md">
+                            <button onclick="state.surveyView='list'; render()" class="p-1.5 rounded-full hover:bg-black/10 transition-colors"><span class="material-icons-round">arrow_back</span></button>
+                            <h1 class="text-[16px] font-bold flex-1">📋 ยืนยันเบิกสินค้า</h1>
+                        </header>
+                        <main class="flex-1 overflow-y-auto p-5 pb-36 space-y-4 animate-fade-in">
+                            <div class="bg-brand-blue/5 rounded-2xl p-4 border border-brand-blue/10 text-center">
+                                <p class="text-xs text-brand-blue font-semibold">จากชั้น <span class="font-extrabold">${state.surveyFloor}</span></p>
+                                <p class="text-2xl font-extrabold text-brand-blue mt-1">${list.length} <span class="text-sm font-medium">รายการ</span></p>
+                                <p class="text-xs text-brand-orange font-semibold">${list.reduce((s,i) => s + i.needOrder, 0)} ${state.products.find(p => p.name === list[0]?.name)?.unit || 'หน่วย'} รวม</p>
+                            </div>
+                            ${renderGroup(criticalItems, '🔴 ด่วน — ใกล้หมด/หมดแล้ว', 'text-rose-600')}
+                            ${renderGroup(lowItems, '⚠️ น้อย — ควรเบิก', 'text-amber-600')}
+                        </main>
+                        <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-100 p-4 shadow-2xl flex gap-3">
+                            <button onclick="state.surveyView='list'; render()" class="flex-1 bg-white border border-slate-200 text-slate-500 py-3.5 rounded-2xl font-semibold text-sm transition-colors hover:bg-slate-50">← แก้ไข</button>
+                            <button onclick="handleSurveyBulkOrder()" class="flex-[2] bg-brand-orange text-white py-3.5 rounded-2xl font-bold text-sm shadow-lg shadow-brand-orange/20 active:scale-[0.98] transition-all">✅ ยืนยันส่งเบิก ${list.length} รายการ</button>
+                        </div>
+                    </div>`;
+            }
+        }
+
         // --- Render Screens ---
         function renderHome() {
             return `
@@ -871,11 +1216,15 @@
                         
                         <div class="space-y-4">
                             <button onclick="setView('w1')" class="w-full bg-brand-blue hover:bg-[#121670] text-white p-4 rounded-2xl font-medium flex items-center justify-center gap-3 transition-all shadow-[0_6px_20px_rgba(23,28,143,0.25)] active:scale-[0.98]">
-                                <span class="material-icons-round text-white/70">storefront</span> พนักงานหน้าร้าน (W1)
+                                <span class="material-icons-round text-white/70">storefront</span> พนักงานหน้าร้าน (TRD)
                             </button>
-                            
+
                             <button onclick="setView('w2')" class="w-full bg-brand-blue hover:bg-[#121670] text-white p-4 rounded-2xl font-medium flex items-center justify-center gap-3 transition-all shadow-[0_6px_20px_rgba(23,28,143,0.25)] active:scale-[0.98]">
-                                <span class="material-icons-round text-white/70">warehouse</span> พนักงานคลังสินค้า (W2)
+                                <span class="material-icons-round text-white/70">warehouse</span> พนักงานคลังสินค้า (AKRA)
+                            </button>
+
+                            <button onclick="setView('survey')" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white p-4 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all shadow-[0_6px_20px_rgba(5,150,105,0.25)] active:scale-[0.98]">
+                                <span class="material-icons-round text-white">search</span> สำรวจสต๊อกหน้าร้าน
                             </button>
 
                             <hr class="border-slate-100 my-2">
@@ -910,13 +1259,13 @@
                                             <span class="material-icons-round text-sm">close</span>
                                         </button>
                                     ` : ''}
-                                    
+
                                     <div class="space-y-4">
                                         <div>
                                             <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">ชื่อสินค้า #${index + 1}</label>
                                             <div class="relative">
-                                                <input type="text" value="${row.itemName}" 
-                                                    oninput="updateW1RowValue(${index}, 'itemName', this.value); filterProducts(this.value, ${index})" 
+                                                <input type="text" value="${row.itemName}"
+                                                    oninput="updateW1RowValue(${index}, 'itemName', this.value); filterProducts(this.value, ${index})"
                                                     onfocus="filterProducts(this.value, ${index})"
                                                     onblur="setTimeout(() => { const el = document.getElementById('autocomplete-list-${index}'); if(el) el.classList.add('hidden'); }, 200)"
                                                     class="w-full p-3 bg-white border border-slate-200 rounded-xl focus:border-brand-blue transition-all text-sm" placeholder="ค้นหาชื่อสินค้า...">
@@ -927,19 +1276,33 @@
                                         <div class="grid grid-cols-2 gap-3">
                                             <div>
                                                 <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">จำนวน ${row.unit ? `(${row.unit})` : ''}</label>
-                                                <input type="number" value="${row.qty}" oninput="updateW1RowValue(${index}, 'qty', this.value)" 
+                                                <input type="number" value="${row.qty}" oninput="updateW1RowValue(${index}, 'qty', this.value)"
                                                     class="w-full p-3 bg-white border border-slate-200 rounded-xl focus:border-brand-blue text-sm font-bold" placeholder="0">
                                             </div>
                                             <div>
-                                                <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">ความจุ ${row.unit ? `(${row.unit})` : ''}</label>
-                                                <input type="number" value="${row.storageCapacity}" oninput="updateW1RowValue(${index}, 'storageCapacity', this.value)" 
-                                                    class="w-full p-3 bg-white border border-slate-200 rounded-xl focus:border-brand-blue text-sm" placeholder="ถ้าทราบ">
+                                                <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">Par Level ${row.unit ? `(${row.unit})` : ''}</label>
+                                                <input type="number" value="${row.parLevel}" oninput="updateW1RowValue(${index}, 'parLevel', this.value)"
+                                                    class="w-full p-3 bg-white border border-slate-200 rounded-xl focus:border-brand-orange text-sm" placeholder="จุดสต๊อกเต็ม">
                                             </div>
                                         </div>
-                                        
+
+                                        <div class="grid grid-cols-2 gap-3 p-3 bg-emerald-50/60 rounded-xl border border-emerald-100">
+                                            <div>
+                                                <label class="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-1.5 ml-1">📍 ชั้น</label>
+                                                <input type="text" value="${row.floor}" oninput="updateW1RowValue(${index}, 'floor', this.value)"
+                                                    class="w-full p-2.5 bg-white border border-emerald-200 rounded-xl focus:border-emerald-500 text-sm" placeholder="ชั้น 1, 2...">
+                                            </div>
+                                            <div>
+                                                <label class="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-1.5 ml-1">📍 โลเคชั่น</label>
+                                                <input type="text" value="${row.location}" oninput="updateW1RowValue(${index}, 'location', this.value)"
+                                                    class="w-full p-2.5 bg-white border border-emerald-200 rounded-xl focus:border-emerald-500 text-sm" placeholder="โคเลชั่นสินค้า เช่น 1-1A">
+                                            </div>
+                                            ${row.floor || row.location ? `<p class="col-span-2 text-[9px] text-emerald-600 font-semibold -mt-1 ml-1">💾 ระบบจะจำตำแหน่งนี้ไว้กับสินค้านี้</p>` : `<p class="col-span-2 text-[9px] text-slate-400 -mt-1 ml-1">กรอกตำแหน่งที่เก็บสินค้า (ใช้ในระบบสำรวจ)</p>`}
+                                        </div>
+
                                         <div>
                                             <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">หมดอายุเก่า</label>
-                                            <input type="text" value="${row.oldExpiry}" oninput="updateW1RowValue(${index}, 'oldExpiry', this.value)" 
+                                            <input type="text" value="${row.oldExpiry}" oninput="updateW1RowValue(${index}, 'oldExpiry', this.value)"
                                                 class="w-full p-3 bg-white border border-slate-200 rounded-xl focus:border-brand-blue text-sm" placeholder="วว-ดด-ปป">
                                         </div>
                                     </div>
@@ -995,7 +1358,7 @@
             return `
                 <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative">
                     <header class="bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
-                        <div class="flex items-center gap-2"><button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button><h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">storefront</span> หน้าร้าน W1</h1></div>
+                        <div class="flex items-center gap-2"><button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button><h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">storefront</span> หน้าร้าน (TRD)</h1></div>
                         <div class="flex items-center gap-2">
                             <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white" title="รีเฟรชข้อมูล"><span class="material-icons-round text-[20px]">refresh</span></button>
                             <div class="text-[10px] font-semibold tracking-wide bg-black/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-white/10"><span class="material-icons-round text-[14px]">account_circle</span> ${currentUser || 'Demo'}</div>
@@ -1005,6 +1368,9 @@
                         <button onclick="setW1Tab('request')" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] transition-all ${state.w1Tab === 'request' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400 hover:text-slate-600'}">เบิกสินค้า</button>
                         <button onclick="setW1Tab('pending')" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] relative transition-all ${state.w1Tab === 'pending' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400 hover:text-slate-600'}">รอรับ</button>
                         <button onclick="setW1Tab('history')" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] transition-all ${state.w1Tab === 'history' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400 hover:text-slate-600'}">ประวัติ</button>
+                        <button onclick="setView('survey')" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] transition-all border-transparent text-emerald-500 hover:text-emerald-700 flex items-center justify-center gap-0.5">
+                            <span class="material-icons-round text-[14px]">search</span>สำรวจ
+                        </button>
                     </div>
                     <main class="flex-1 overflow-y-auto p-5 pb-24">${content}</main>
                 </div>`;
@@ -1076,7 +1442,7 @@
             return `
                 <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative">
                     <header class="bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
-                        <div class="flex items-center gap-2"><button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button><h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">warehouse</span> คลังสินค้า W2</h1></div>
+                        <div class="flex items-center gap-2"><button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button><h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">warehouse</span> คลังสินค้า (AKRA)</h1></div>
                         <div class="flex items-center gap-2">
                             <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white" title="รีเฟรชข้อมูล"><span class="material-icons-round text-[20px]">refresh</span></button>
                             <div class="text-[10px] font-semibold tracking-wide bg-black/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-white/10"><span class="material-icons-round text-[14px]">account_circle</span> ${currentUser || 'Demo'}</div>
@@ -1093,10 +1459,11 @@
         // Main Render Function
         function render() {
             const root = document.getElementById('app-root');
-            if (state.view === 'home') { root.innerHTML = renderHome(); } 
-            else if (state.view === 'w1') { root.innerHTML = renderW1(); } 
-            else if (state.view === 'w2') { root.innerHTML = renderW2(); }
+            if (state.view === 'home')      { root.innerHTML = renderHome(); }
+            else if (state.view === 'w1')   { root.innerHTML = renderW1(); }
+            else if (state.view === 'w2')   { root.innerHTML = renderW2(); }
             else if (state.view === 'dashboard') { root.innerHTML = renderDashboard(); }
+            else if (state.view === 'survey')    { root.innerHTML = renderSurvey(); }
         }
 
         // ==========================================
