@@ -348,6 +348,35 @@
             if (ratio < 1.0)  return { status: 'low',      label: '⚠️ น้อย',    color: 'text-amber-600',  bg: 'bg-amber-50',  border: 'border-amber-200',  needOrder: need, dot: 'bg-amber-400' };
             return              { status: 'ok',       label: '✅ พอแล้ว',  color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', needOrder: 0,    dot: 'bg-emerald-400' };
         }
+        function parseFormattedDate(str) {
+            if (!str) return null;
+            const match = str.match(/(\d{2})-(\d{2})-(\d{4})/);
+            if (!match) return null;
+            let year = parseInt(match[3]);
+            if (year > 2500) year -= 543;
+            return new Date(year, parseInt(match[2]) - 1, parseInt(match[1]));
+        }
+
+        function getLastDispatchInfo(itemName) {
+            const dispatched = state.items.filter(i =>
+                i.itemName === itemName && i.status === 'จัดส่งแล้ว'
+            );
+            if (dispatched.length === 0) return null;
+            let latestDate = null;
+            dispatched.forEach(item => {
+                const d = item.dispatchTimestamp ? parseFormattedDate(item.dispatchTimestamp) : item.rawDate;
+                if (d && (!latestDate || d > latestDate)) latestDate = d;
+            });
+            if (!latestDate) return null;
+            const daysAgo = Math.floor((Date.now() - latestDate.getTime()) / (1000 * 60 * 60 * 24));
+            const label = daysAgo === 0 ? 'วันนี้' : daysAgo + ' วันที่แล้ว';
+            if      (daysAgo <= 3)  return { daysAgo, label, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' };
+            else if (daysAgo <= 7)  return { daysAgo, label, color: 'text-lime-600',    bg: 'bg-lime-50',    border: 'border-lime-200' };
+            else if (daysAgo <= 14) return { daysAgo, label, color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' };
+            else if (daysAgo <= 30) return { daysAgo, label, color: 'text-orange-600',  bg: 'bg-orange-50',  border: 'border-orange-200' };
+            else                    return { daysAgo, label, color: 'text-rose-600',    bg: 'bg-rose-50',    border: 'border-rose-200' };
+        }
+
         function getProductUnitClient(itemName) {
             if (!itemName) return 'หน่วย';
             const prod = state.products.find(p => {
@@ -1174,6 +1203,7 @@
                     const par = data.parLevel !== undefined ? data.parLevel : (prod.parLevel || '');
                     const st = (cur !== '' && par !== '') ? getStockStatus(cur, par) : null;
                     const encodedName = encodeURIComponent(prod.name);
+                    const lastDis = getLastDispatchInfo(prod.name);
 
                     return `
                         <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3" id="survey-row-${encodedName}">
@@ -1181,6 +1211,12 @@
                                 <div class="flex-1 min-w-0">
                                     <h3 class="font-bold text-brand-blue text-sm leading-snug truncate">${prod.name}</h3>
                                     ${prod.location ? `<p class="text-[10px] text-slate-400 mt-0.5 flex items-center gap-0.5"><span class="material-icons-round text-[12px]">place</span>${prod.location}</p>` : ''}
+                                    ${lastDis
+                                        ? `<span class="mt-1 inline-flex items-center gap-0.5 text-[10px] font-semibold ${lastDis.color} ${lastDis.bg} ${lastDis.border} border px-2 py-0.5 rounded-full">
+                                               <span class="material-icons-round text-[11px]">history</span>* เบิกล่าสุด ${lastDis.label}
+                                           </span>`
+                                        : `<span class="mt-1 inline-flex text-[10px] text-slate-300 font-medium">* ยังไม่มีประวัติเบิก</span>`
+                                    }
                                 </div>
                                 ${st ? `<span class="text-[10px] font-bold px-2 py-1 rounded-full border ${st.bg} ${st.color} ${st.border} flex-shrink-0">${st.label}</span>` : ''}
                             </div>
