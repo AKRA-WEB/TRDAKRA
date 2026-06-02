@@ -182,7 +182,7 @@
         // ==========================================
         // 1. CONFIGURATION & STATE
         // ==========================================
-        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw7owW6zo44sbONxJpeIgwm6Z8xtzrvSAX0ZvUTro1VpQhml7FmtQ1cpkvXY1tYjgs/exec';
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwiG8bB8P5c_U_ZQkPpb2tNxFVIRZDiuxLQTzGQtWSJ6VUNQrJpsIlgaADON7D945c/exec';
         let state = {
             view: 'home',
             w1Tab: 'request',
@@ -1761,8 +1761,8 @@
             return cleaned;
         }
 
-        function selectCheckStockLocation(location) {
-            state.checkStockLocation = location;
+        function selectCheckStockLocation(floor, location) {
+            state.checkStockLocation = { floor, location };
             state.checkStockEdits = {};
             state.checkStockSearch = '';
             render();
@@ -1814,8 +1814,9 @@
         function updateCheckStockSearch(value) {
             state.checkStockSearch = value;
             const search = value.toLowerCase().trim();
-            const loc = state.checkStockLocation;
-            const locProducts = state.products.filter(p => p.location === loc && p.floor !== 'NOSTK');
+            const locObj = state.checkStockLocation;
+            if (!locObj) return;
+            const locProducts = state.products.filter(p => p.location === locObj.location && p.floor === locObj.floor && p.floor !== 'NOSTK');
             
             const filtered = search
                 ? locProducts.filter(p => p.name.toLowerCase().includes(search))
@@ -1832,10 +1833,12 @@
         }
 
         async function handleCheckStockSubmit() {
-            const loc = state.checkStockLocation;
-            if (!loc) return;
+            const locObj = state.checkStockLocation;
+            if (!locObj) return;
+            const loc = locObj.location;
+            const floor = locObj.floor;
 
-            const locProducts = state.products.filter(p => p.location === loc && p.floor !== 'NOSTK');
+            const locProducts = state.products.filter(p => p.location === loc && p.floor === floor && p.floor !== 'NOSTK');
             const checkedProducts = locProducts.filter(p => state.checkStockEdits[p.name]?.checked);
 
             // Validation: Checked products must have a quantity input
@@ -1925,7 +1928,7 @@
                     body: JSON.stringify({
                         action: 'saveSurveyLog',
                         surveyedBy: currentUser || 'ไม่ทราบ',
-                        floor: loc, // save location as floor (e.g. 1A-01)
+                        floor: `${floor} - ${loc}`, // Save as e.g. "2 - 3B"
                         items: logItems
                     })
                 });
@@ -1934,12 +1937,13 @@
                 localStorage.removeItem('TRDAKRA_DATA');
                 hideLoading();
 
-                alert(`✅ บันทึกสต๊อกสำเร็จ!\nส่งสั่งเบิก ${newOrders.length} รายการ จากโลเคชั่น ${loc}`);
-                sendAppLog('ตรวจสต๊อกรายโลเคชั่น', `โลเคชั่น ${loc}: ส่งเบิก ${newOrders.length} รายการ`);
+                alert(`✅ บันทึกสต๊อกสำเร็จ!\nส่งสั่งเบิก ${newOrders.length} รายการ จากโลเคชั่น ชั้น ${floor} - ${loc}`);
+                sendAppLog('ตรวจสต๊อกรายโลเคชั่น', `โลเคชั่น ชั้น ${floor} - ${loc}: ส่งเบิก ${newOrders.length} รายการ`);
 
                 // Mark location as checked
+                const compoundKey = `${floor}|${loc}`;
                 if (!state.checkStockCheckedLocations) state.checkStockCheckedLocations = {};
-                state.checkStockCheckedLocations[loc] = new Date().toISOString();
+                state.checkStockCheckedLocations[compoundKey] = new Date().toISOString();
                 localStorage.setItem('TRDAKRA_CHECKED_LOCATIONS', JSON.stringify(state.checkStockCheckedLocations));
 
                 // Reset and go back to location selector page
@@ -2072,15 +2076,15 @@
                                 </h3>
                                 <div class="grid grid-cols-3 gap-2">
                                     ${locs.map(loc => {
-                                        const count = state.products.filter(p => p.location === loc && p.floor !== 'NOSTK').length;
-                                        const isCheckedToday = !!cleanedChecked[loc];
+                                        const count = state.products.filter(p => p.floor === f && p.location === loc && p.floor !== 'NOSTK').length;
+                                        const isCheckedToday = !!cleanedChecked[`${f}|${loc}`];
                                         
                                         const btnBg = isCheckedToday 
                                             ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100/50 hover:border-emerald-300' 
                                             : 'bg-slate-50 border-slate-200 hover:border-brand-blue hover:bg-brand-blue/5 text-slate-700 hover:text-brand-blue';
                                             
                                         return `
-                                            <button onclick="selectCheckStockLocation('${loc}')"
+                                            <button onclick="selectCheckStockLocation('${f}', '${loc}')"
                                                 class="py-3 px-2 border rounded-xl text-center active:scale-95 transition-all flex flex-col justify-center items-center gap-1 ${btnBg}">
                                                 <span class="text-xs font-bold tracking-wide flex items-center gap-1">
                                                     ${isCheckedToday ? '<span class="material-icons-round text-[12px] text-emerald-600">check_circle</span>' : ''}
@@ -2140,8 +2144,10 @@
                     </div>`;
             } else {
                 // ─── 2. หน้าเช็คสินค้าในโลเคชั่นที่เลือก ───
-                const loc = state.checkStockLocation;
-                const locProducts = state.products.filter(p => p.location === loc && p.floor !== 'NOSTK');
+                const locObj = state.checkStockLocation;
+                const loc = locObj.location;
+                const floor = locObj.floor;
+                const locProducts = state.products.filter(p => p.location === loc && p.floor === floor && p.floor !== 'NOSTK');
                 const search = (state.checkStockSearch || '').toLowerCase().trim();
                 
                 const filteredProducts = search
@@ -2157,7 +2163,7 @@
                                 <span class="material-icons-round">arrow_back</span>
                             </button>
                             <div class="flex-1 min-w-0">
-                                <h1 class="text-[16px] font-bold">📍 โลเคชั่น: ${loc}</h1>
+                                <h1 class="text-[16px] font-bold">📍 ชั้น ${floor} - โลเคชั่น: ${loc}</h1>
                                 <p class="text-[11px] text-white/70">เช็คสต๊อกทั้งหมด ${locProducts.length} รายการ</p>
                             </div>
                         </header>
