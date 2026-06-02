@@ -194,14 +194,18 @@
             w1Rows: [{ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' }],
             // Survey State
             surveyFloor: null,
-            surveyData: {},       // { itemName: { currentStock, parLevel } }
-            surveyConfirmList: [], // รายการที่จะเบิก
-            surveyView: 'floors',  // 'floors' | 'list' | 'confirm'
+            surveyZone: null,
+            surveyData: {},
+            surveyConfirmList: [],
+            surveyView: 'floors',
             // Location Manager State
             locationSearch: '',
             locationShowAll: false,
-            locationTab: 'missing',   // 'missing' | 'nostk'
-            locationEdits: {}         // { productName: { floor, location } }
+            locationEdits: {},
+            locationFloorFilter: '',
+            locationZoneFilter: '',
+            locationAddMode: false,
+            locationAddSearch: ''
         };
 
         function showLoading(text = 'กำลังทำงาน...') {
@@ -348,6 +352,48 @@
             if (ratio < 1.0)  return { status: 'low',      label: '⚠️ น้อย',    color: 'text-amber-600',  bg: 'bg-amber-50',  border: 'border-amber-200',  needOrder: need, dot: 'bg-amber-400' };
             return              { status: 'ok',       label: '✅ พอแล้ว',  color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', needOrder: 0,    dot: 'bg-emerald-400' };
         }
+        function extractZone(location) {
+            if (!location) return '';
+            return location.split('-')[0].trim();
+        }
+
+        function setLocationFloor(floor) {
+            state.locationFloorFilter = state.locationFloorFilter === floor ? '' : floor;
+            state.locationZoneFilter = '';
+            state.locationAddMode = false;
+            state.locationSearch = '';
+            render();
+        }
+
+        function setLocationZone(zone) {
+            state.locationZoneFilter = state.locationZoneFilter === zone ? '' : zone;
+            state.locationAddMode = false;
+            render();
+        }
+
+        function toggleLocationAddMode() {
+            state.locationAddMode = !state.locationAddMode;
+            state.locationAddSearch = '';
+            render();
+        }
+
+        function addProductToCurrentZone(productName) {
+            const floor = state.locationFloorFilter;
+            const zone  = state.locationZoneFilter;
+            if (!floor || !zone) return;
+            if (!state.locationEdits[productName]) {
+                const existing = state.products.find(p => p.name === productName) || {};
+                state.locationEdits[productName] = { floor, location: zone, parLevel: existing.parLevel || '' };
+            } else {
+                state.locationEdits[productName].floor    = floor;
+                state.locationEdits[productName].location = zone;
+            }
+            const idx = state.products.findIndex(p => p.name === productName);
+            if (idx !== -1) { state.products[idx].floor = floor; state.products[idx].location = zone; }
+            state.locationAddSearch = '';
+            render();
+        }
+
         function parseFormattedDate(str) {
             if (!str) return null;
             const match = str.match(/(\d{2})-(\d{2})-(\d{4})/);
@@ -493,8 +539,11 @@
             if (viewName === 'location') {
                 state.locationSearch = '';
                 state.locationShowAll = false;
-                state.locationTab = 'missing';
                 state.locationEdits = {};
+                state.locationFloorFilter = '';
+                state.locationZoneFilter = '';
+                state.locationAddMode = false;
+                state.locationAddSearch = '';
             }
             if (viewName === 'survey') {
                 // Restore survey data but always land on floor selector
@@ -732,8 +781,14 @@
             fetchInitialData(true);
         }
 
+        function setSurveyZone(zone) {
+            state.surveyZone = state.surveyZone === zone ? null : zone;
+            render();
+        }
+
         function setSurveyFloor(floor) {
             state.surveyFloor = floor;
+            state.surveyZone = null;
             state.surveyView = 'list';
             try { localStorage.setItem('TRDAKRA_SURVEY_SESSION', JSON.stringify({ floor: floor, data: state.surveyData })); } catch(e) {}
             render();
@@ -1193,11 +1248,16 @@
             // ─── หน้า Survey List ───
             if (state.surveyView === 'list') {
                 const floorProducts = state.products.filter(p => p.floor === state.surveyFloor);
-                const surveyFilterEl = () => {
-                    try { return document.getElementById('survey-filter') ? document.getElementById('survey-filter').value : 'all'; } catch(e) { return 'all'; }
-                };
 
-                const rows = floorProducts.map(prod => {
+                // Zone filter
+                const zoneSet = new Set();
+                floorProducts.forEach(p => { const z = extractZone(p.location); if (z) zoneSet.add(z); });
+                const zones = [...zoneSet].sort();
+                const filteredProducts = state.surveyZone
+                    ? floorProducts.filter(p => extractZone(p.location) === state.surveyZone)
+                    : floorProducts;
+
+                const rows = filteredProducts.map(prod => {
                     const data = state.surveyData[prod.name] || {};
                     const cur = data.currentStock !== undefined ? data.currentStock : '';
                     const par = data.parLevel !== undefined ? data.parLevel : (prod.parLevel || '');
@@ -1252,13 +1312,23 @@
                                 <p class="text-[11px] text-white/70">${floorProducts.length} รายการ</p>
                             </div>
                         </header>
-                        <div class="bg-white px-4 py-3 sticky top-[68px] z-10 border-b border-slate-100 shadow-sm">
-                            <input type="text" id="survey-search" placeholder="🔍 ค้นหาชื่อสินค้า..."
-                                oninput="renderSurveyListFilter()"
-                                class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
+                        <div class="bg-white sticky top-[68px] z-10 border-b border-slate-100 shadow-sm">
+                            <div class="px-4 pt-3 pb-2">
+                                <input type="text" id="survey-search" placeholder="🔍 ค้นหาชื่อสินค้า..."
+                                    oninput="renderSurveyListFilter()"
+                                    class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
+                            </div>
+                            ${zones.length > 0 ? `
+                            <div class="flex gap-2 overflow-x-auto px-4 pb-2.5 scrollbar-none">
+                                <button onclick="setSurveyZone(null)" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${!state.surveyZone ? 'bg-brand-blue text-white' : 'bg-white border border-slate-200 text-slate-500'}">ทั้งหมด (${floorProducts.length})</button>
+                                ${zones.map(z => {
+                                    const cnt = floorProducts.filter(p => extractZone(p.location) === z).length;
+                                    return `<button onclick="setSurveyZone('${z}')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${state.surveyZone === z ? 'bg-brand-blue text-white' : 'bg-white border border-slate-200 text-slate-500'}">โซน ${z} (${cnt})</button>`;
+                                }).join('')}
+                            </div>` : ''}
                         </div>
                         <main class="flex-1 overflow-y-auto p-4 pb-36 space-y-3 animate-fade-in" id="survey-list-main">
-                            ${floorProducts.length === 0 ? `<div class="text-center text-slate-400 text-sm py-16">ไม่มีสินค้าในชั้นนี้</div>` : rows}
+                            ${filteredProducts.length === 0 ? `<div class="text-center text-slate-400 text-sm py-16">${state.surveyZone ? 'ไม่มีสินค้าในโซนนี้' : 'ไม่มีสินค้าในชั้นนี้'}</div>` : rows}
                         </main>
                         <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-100 p-4 shadow-2xl" id="survey-summary">
                             ${renderSurveySummaryBar(orderList)}
@@ -1700,41 +1770,53 @@
         }
 
         function renderLocationManager() {
-            const search = (state.locationSearch || '').toLowerCase().trim();
-            const tab = state.locationTab;
-            const editCount = Object.keys(state.locationEdits).length;
+            const editCount    = Object.keys(state.locationEdits).length;
+            const floorF       = state.locationFloorFilter;
+            const zoneF        = state.locationZoneFilter;
+            const addMode      = state.locationAddMode;
+            const search       = (state.locationSearch   || '').toLowerCase().trim();
+            const addSearch    = (state.locationAddSearch || '').toLowerCase().trim();
+            const FLOORS       = ['1','2','3','4','5'];
 
-            const missingList = state.products.filter(p => !p.floor);
-            const nostkList   = state.products.filter(p => p.floor === 'NOSTK');
-            const missingCount = missingList.length;
-            const nostkCount   = nostkList.length;
+            const missingCount = state.products.filter(p => !p.floor).length;
 
-            // List logic
-            let displayList, showAllBtn = '';
+            // Zones available for selected floor
+            let zones = [];
+            if (floorF && floorF !== 'NOSTK') {
+                const zSet = new Set();
+                state.products.filter(p => p.floor === floorF && p.location)
+                    .forEach(p => { const z = extractZone(p.location); if (z) zSet.add(z); });
+                zones = [...zSet].sort();
+            }
+
+            // Build main display list
+            let displayList = [], showAllBtn = '';
             if (search) {
-                // Search scans all products except NOSTK for clarity; show all when searching
                 displayList = state.products.filter(p => p.floor !== 'NOSTK' && p.name.toLowerCase().includes(search));
-            } else if (tab === 'nostk') {
-                displayList = nostkList;
+            } else if (floorF === 'NOSTK') {
+                displayList = state.products.filter(p => p.floor === 'NOSTK');
+            } else if (floorF && zoneF) {
+                displayList = state.products.filter(p => p.floor === floorF && extractZone(p.location) === zoneF);
+            } else if (floorF) {
+                displayList = state.products.filter(p => p.floor === floorF);
             } else {
-                // missing tab — default 20, show-all button
-                displayList = state.locationShowAll ? missingList : missingList.slice(0, 20);
-                if (!state.locationShowAll && missingCount > 20) {
-                    showAllBtn = `
-                        <button onclick="state.locationShowAll=true; render()" class="w-full mt-2 py-3 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-500 hover:bg-slate-50 transition-all flex items-center justify-center gap-2">
-                            <span class="material-icons-round text-[16px]">expand_more</span>
-                            แสดงทั้งหมด ${missingCount} รายการ
-                        </button>`;
+                const missing = state.products.filter(p => !p.floor);
+                displayList = state.locationShowAll ? missing : missing.slice(0, 20);
+                if (!state.locationShowAll && missing.length > 20) {
+                    showAllBtn = `<button onclick="state.locationShowAll=true; render()" class="w-full mt-2 py-3 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-500 flex items-center justify-center gap-2"><span class="material-icons-round text-[16px]">expand_more</span>แสดงทั้งหมด ${missing.length} รายการ</button>`;
                 }
             }
 
-            const rows = displayList.map(renderLocationRow).join('');
+            // Products available to add (unassigned)
+            const addable = state.products.filter(p => !p.floor && (!addSearch || p.name.toLowerCase().includes(addSearch)));
 
-            const emptyMsg = search
-                ? 'ไม่พบสินค้าที่ค้นหา'
-                : tab === 'nostk'
-                    ? 'ยังไม่มีสินค้าที่ถูกระบุว่าไม่มีพื้นที่จัด'
-                    : 'สินค้าทุกรายการมีโลเคชั่นแล้ว 🎉';
+            const canAdd = !!(floorF && floorF !== 'NOSTK' && zoneF);
+
+            const emptyMsg = search ? 'ไม่พบสินค้าที่ค้นหา'
+                : floorF === 'NOSTK' ? 'ยังไม่มีสินค้ากลุ่มนี้'
+                : floorF && zoneF ? `ยังไม่มีสินค้าในโซน ${zoneF}`
+                : floorF ? `ยังไม่มีสินค้าในชั้น ${floorF}`
+                : 'สินค้าทุกรายการมีโลเคชั่นแล้ว 🎉';
 
             return `
                 <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative animate-fade-in">
@@ -1743,49 +1825,85 @@
                             <button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
                                 <span class="material-icons-round">arrow_back</span>
                             </button>
-                            <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5">
-                                <span class="material-icons-round text-[20px]">place</span> จัดโลเคชั่นสินค้า
-                            </h1>
+                            <div>
+                                <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5">
+                                    <span class="material-icons-round text-[20px]">place</span> จัดโลเคชั่นสินค้า
+                                </h1>
+                                ${floorF || zoneF ? `<p class="text-[11px] text-white/70 mt-0.5">${floorF ? (floorF === 'NOSTK' ? 'ไม่มีพื้นที่จัด' : 'ชั้น ' + floorF) : ''}${zoneF ? ' › โซน ' + zoneF : ''}</p>` : ''}
+                            </div>
                         </div>
-                        <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
-                            <span class="material-icons-round text-[20px]">refresh</span>
-                        </button>
+                        <div class="flex items-center gap-2">
+                            ${canAdd ? `<button onclick="toggleLocationAddMode()" class="p-1.5 rounded-full transition-colors ${addMode ? 'bg-white/20 text-white' : 'hover:bg-black/10 text-white'}" title="เพิ่มสินค้าเข้าโซน"><span class="material-icons-round text-[22px]">${addMode ? 'close' : 'add_circle'}</span></button>` : ''}
+                            <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round text-[20px]">refresh</span></button>
+                        </div>
                     </header>
 
-                    <!-- Search -->
-                    <div class="p-4 bg-white border-b border-slate-100 sticky top-[60px] z-10 shadow-sm">
-                        <input type="text" value="${state.locationSearch}" placeholder="🔍 ค้นหาชื่อสินค้า..."
-                            oninput="updateLocationSearch(this.value)"
-                            class="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:border-brand-blue focus:bg-white transition-all">
+                    <!-- Floor filter row -->
+                    <div class="bg-white border-b border-slate-100 px-3 py-2.5 overflow-x-auto flex gap-2 shadow-sm">
+                        <button onclick="setLocationFloor('')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${!floorF ? 'bg-rose-500 text-white' : 'bg-white border border-slate-200 text-slate-500'}">
+                            ยังไม่มีโลเคชั่น ${missingCount > 0 ? `<span class="ml-1 ${!floorF ? 'bg-white/30 text-white' : 'bg-rose-100 text-rose-600'} text-[10px] px-1 rounded-full">${missingCount}</span>` : ''}
+                        </button>
+                        ${FLOORS.map(f => {
+                            const cnt = state.products.filter(p => p.floor === f).length;
+                            return `<button onclick="setLocationFloor('${f}')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${floorF === f ? 'bg-brand-blue text-white' : 'bg-white border border-slate-200 text-slate-500'}">ชั้น ${f}${cnt > 0 ? ` <span class="text-[10px] opacity-70">(${cnt})</span>` : ''}</button>`;
+                        }).join('')}
+                        <button onclick="setLocationFloor('NOSTK')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${floorF === 'NOSTK' ? 'bg-slate-600 text-white' : 'bg-white border border-slate-200 text-slate-500'}">❌ NOSTK</button>
                     </div>
 
-                    <!-- Tabs (hidden when searching) -->
-                    ${!search ? `
-                    <div class="flex bg-white border-b border-slate-100 px-2">
-                        <button onclick="state.locationTab='missing'; state.locationShowAll=false; render()" class="flex-1 py-3 text-[12px] font-semibold border-b-2 transition-all ${tab === 'missing' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400'}">
-                            ยังไม่มีโลเคชั่น
-                            ${missingCount > 0 ? `<span class="ml-1 bg-rose-100 text-rose-600 text-[10px] px-1.5 py-0.5 rounded-full">${missingCount}</span>` : ''}
-                        </button>
-                        <button onclick="state.locationTab='nostk'; render()" class="flex-1 py-3 text-[12px] font-semibold border-b-2 transition-all ${tab === 'nostk' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400'}">
-                            ไม่มีพื้นที่จัด
-                            ${nostkCount > 0 ? `<span class="ml-1 bg-slate-100 text-slate-500 text-[10px] px-1.5 py-0.5 rounded-full">${nostkCount}</span>` : ''}
-                        </button>
+                    <!-- Zone filter row (when floor selected, not NOSTK) -->
+                    ${floorF && floorF !== 'NOSTK' ? `
+                    <div class="bg-white border-b border-slate-100 px-3 py-2 overflow-x-auto flex gap-2">
+                        <button onclick="setLocationZone('')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${!zoneF ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-500'}">ทุกโซน</button>
+                        ${zones.map(z => {
+                            const cnt = state.products.filter(p => p.floor === floorF && extractZone(p.location) === z).length;
+                            return `<button onclick="setLocationZone('${z}')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${zoneF === z ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-500'}">โซน ${z} (${cnt})</button>`;
+                        }).join('')}
+                        ${canAdd ? `<button onclick="toggleLocationAddMode()" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold bg-emerald-500 text-white flex items-center gap-1 transition-all"><span class="material-icons-round text-[13px]">add</span> เพิ่มสินค้า</button>` : ''}
                     </div>` : ''}
 
-                    <!-- Context label -->
-                    ${tab === 'nostk' && !search ? `
+                    <!-- Add panel -->
+                    ${addMode && canAdd ? `
+                    <div class="bg-indigo-50 border-b-2 border-indigo-200 p-4">
+                        <p class="text-[12px] font-bold text-indigo-700 mb-2">➕ เพิ่มสินค้าเข้า ชั้น ${floorF} › โซน ${zoneF}</p>
+                        <input type="text" value="${state.locationAddSearch}" placeholder="🔍 ค้นหาสินค้าที่ยังไม่มีโลเคชั่น..."
+                            oninput="state.locationAddSearch=this.value; render()"
+                            class="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-sm focus:border-indigo-500 transition-all mb-2">
+                        <div class="max-h-52 overflow-y-auto space-y-1">
+                            ${addable.length === 0
+                                ? `<p class="text-center text-[12px] text-slate-400 py-4">ไม่พบสินค้าที่ไม่มีโลเคชั่น</p>`
+                                : addable.slice(0, 40).map(p => `
+                                    <div onclick="addProductToCurrentZone(decodeURIComponent('${encodeURIComponent(p.name)}'))"
+                                        class="bg-white rounded-xl px-3 py-2.5 flex items-center justify-between border border-slate-100 active:bg-indigo-50 cursor-pointer transition-colors">
+                                        <span class="text-sm font-medium text-brand-blue truncate pr-2">${p.name}</span>
+                                        <span class="flex-shrink-0 text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                                            <span class="material-icons-round text-[11px]">add</span>เพิ่ม
+                                        </span>
+                                    </div>`).join('')
+                            }
+                        </div>
+                    </div>` : ''}
+
+                    <!-- Search -->
+                    <div class="p-3 bg-white border-b border-slate-100">
+                        <input type="text" value="${state.locationSearch}" placeholder="🔍 ค้นหาชื่อสินค้า..."
+                            oninput="updateLocationSearch(this.value)"
+                            class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:border-brand-blue focus:bg-white transition-all">
+                    </div>
+
+                    <!-- NOSTK context note -->
+                    ${floorF === 'NOSTK' ? `
                     <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-100">
-                        <p class="text-[11px] text-slate-500">สินค้าในกลุ่มนี้ไม่ได้เก็บสต๊อกหน้าร้าน เช่น ของแช่ฟรีซ หรือสินค้าคลังนอก จะไม่ถูกนับในระบบสำรวจ</p>
+                        <p class="text-[11px] text-slate-500">สินค้ากลุ่มนี้ไม่เก็บสต๊อกหน้าร้าน (ของแช่ฟรีซ, คลังนอก) ไม่ถูกนับในระบบสำรวจ</p>
                     </div>` : ''}
 
                     <main id="location-list" class="flex-1 overflow-y-auto p-4 ${editCount > 0 ? 'pb-36' : 'pb-6'}">
-                        ${search ? `<p class="text-[11px] text-slate-400 font-medium mb-3 px-1">ผลการค้นหา <span class="font-bold text-brand-blue">${displayList.length} รายการ</span> (ไม่รวมกลุ่มไม่มีพื้นที่จัด)</p>` : ''}
+                        ${search ? `<p class="text-[11px] text-slate-400 font-medium mb-3 px-1">ผลการค้นหา <span class="font-bold text-brand-blue">${displayList.length} รายการ</span></p>` : ''}
                         ${displayList.length === 0
                             ? `<div class="flex flex-col items-center justify-center py-16 text-slate-400">
                                 <span class="material-icons-round text-[40px] mb-2">check_circle_outline</span>
                                 <p class="text-sm font-medium text-center px-4">${emptyMsg}</p>
                                </div>`
-                            : rows + showAllBtn}
+                            : displayList.map(renderLocationRow).join('') + showAllBtn}
                     </main>
 
                     ${editCount > 0 ? `
