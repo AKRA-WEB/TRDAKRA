@@ -380,10 +380,13 @@
                         if (typeof p === 'object' && p !== null) {
                             return {
                                 name: p.name || p.itemName || p[0] || '',
-                                unit: p.unit || p[1] || 'หน่วย'
+                                unit: p.unit || p[1] || 'หน่วย',
+                                floor: p.floor || '',
+                                location: p.location || '',
+                                parLevel: parseInt(p.parLevel) || 0
                             };
                         }
-                        return { name: String(p).trim(), unit: 'หน่วย' };
+                        return { name: String(p).trim(), unit: 'หน่วย', floor: '', location: '', parLevel: 0 };
                     }).filter(p => p.name !== '');
                 } else { state.products = []; }
 
@@ -454,10 +457,27 @@
                 state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' }];
             }
             if (viewName === 'survey') {
-                state.surveyView = 'floors';
-                state.surveyFloor = null;
-                state.surveyData = {};
-                state.surveyConfirmList = [];
+                // Restore saved survey session if exists
+                try {
+                    const saved = localStorage.getItem('TRDAKRA_SURVEY_SESSION');
+                    if (saved) {
+                        const session = JSON.parse(saved);
+                        state.surveyFloor = session.floor || null;
+                        state.surveyData = session.data || {};
+                        state.surveyView = state.surveyFloor ? 'list' : 'floors';
+                        state.surveyConfirmList = [];
+                    } else {
+                        state.surveyView = 'floors';
+                        state.surveyFloor = null;
+                        state.surveyData = {};
+                        state.surveyConfirmList = [];
+                    }
+                } catch(e) {
+                    state.surveyView = 'floors';
+                    state.surveyFloor = null;
+                    state.surveyData = {};
+                    state.surveyConfirmList = [];
+                }
             }
             render();
         }
@@ -642,15 +662,57 @@
         // ==========================================
         // 4b. SURVEY ACTION HANDLERS
         // ==========================================
+        async function importParLevelsFromHistory() {
+            // Build max storageCapacity per itemName from dispatched history
+            const maxCapacity = {};
+            state.items.forEach(item => {
+                if (item.status === 'จัดส่งแล้ว') {
+                    const cap = parseInt(item.storageCapacity) || 0;
+                    if (cap > 0) {
+                        if (!maxCapacity[item.itemName] || cap > maxCapacity[item.itemName]) {
+                            maxCapacity[item.itemName] = cap;
+                        }
+                    }
+                }
+            });
+
+            const entries = Object.entries(maxCapacity);
+            if (entries.length === 0) { alert('ไม่พบข้อมูล storageCapacity ในประวัติ'); return; }
+            if (!confirm(`นำเข้า Par Level จากประวัติ ${entries.length} รายการ\nจะ update Products Sheet ทันที ยืนยัน?`)) return;
+
+            showLoading(`กำลังนำเข้า Par Level 0/${entries.length}...`);
+            let count = 0;
+            for (const [itemName, parLevel] of entries) {
+                const existing = getProductDetails(itemName);
+                await pushProductDetails(itemName, existing.floor || '', existing.location || '', parLevel);
+                count++;
+                document.getElementById('loading-text').innerText = `กำลังนำเข้า Par Level ${count}/${entries.length}...`;
+            }
+            // Invalidate cache so next load gets fresh parLevel
+            localStorage.removeItem('TRDAKRA_DATA');
+            hideLoading();
+            alert(`✅ นำเข้า Par Level สำเร็จ ${count} รายการ\nกำลังรีเฟรชข้อมูล...`);
+            sendAppLog('นำเข้า Par Level จากประวัติ', `อัปเดต ${count} รายการ`);
+            fetchInitialData(true);
+        }
+
         function setSurveyFloor(floor) {
             state.surveyFloor = floor;
             state.surveyView = 'list';
+            try { localStorage.setItem('TRDAKRA_SURVEY_SESSION', JSON.stringify({ floor: floor, data: state.surveyData })); } catch(e) {}
             render();
         }
 
         function updateSurveyData(itemName, field, value) {
             if (!state.surveyData[itemName]) state.surveyData[itemName] = { currentStock: '', parLevel: '' };
             state.surveyData[itemName][field] = value;
+            // Persist survey session to survive page refresh
+            try {
+                localStorage.setItem('TRDAKRA_SURVEY_SESSION', JSON.stringify({
+                    floor: state.surveyFloor,
+                    data: state.surveyData
+                }));
+            } catch(e) {}
             // Real-time re-render สรุปท้ายหน้า
             const summaryEl = document.getElementById('survey-summary');
             if (summaryEl) {
@@ -749,6 +811,7 @@
             hideLoading();
             alert(`✅ ส่งเบิกสำเร็จ ${newItems.length} รายการ จากชั้น ${state.surveyFloor}`);
             sendAppLog('สำรวจสต๊อก+เบิก (Survey)', `ชั้น ${state.surveyFloor}: เบิก ${newItems.length} รายการ`);
+            localStorage.removeItem('TRDAKRA_SURVEY_SESSION');
             state.surveyView = 'floors';
             state.surveyFloor = null;
             state.surveyData = {};
@@ -1081,6 +1144,9 @@
                             <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
                                 <p class="text-[11px] text-slate-500">สินค้าในระบบ <span class="font-bold text-brand-blue">${totalInSystem}</span> รายการ • ระบุชั้นแล้ว <span class="font-bold text-emerald-600">${totalWithFloor}</span> รายการ</p>
                                 <p class="text-[10px] text-slate-400 mt-1">💡 เบิกสินค้าพร้อมกรอก Floor/Location เพื่อให้ข้อมูลครบ</p>
+                                <button onclick="importParLevelsFromHistory()" class="mt-3 w-full py-2.5 bg-brand-blue/5 hover:bg-brand-blue/10 border border-brand-blue/20 text-brand-blue text-[11px] font-semibold rounded-xl transition-all flex items-center justify-center gap-1.5">
+                                    <span class="material-icons-round text-[14px]">download</span> นำเข้า Par Level จากประวัติการเบิก
+                                </button>
                             </div>
                             <h2 class="text-sm font-bold text-brand-blue px-1">เลือกชั้นที่จะสำรวจ</h2>
                             <div class="grid grid-cols-2 gap-3">${floorCards || '<p class="col-span-2 text-center text-slate-400 text-sm py-8">ยังไม่มีข้อมูลชั้น<br>กรุณาเบิกสินค้าพร้อมระบุ Floor ก่อน</p>'}</div>
