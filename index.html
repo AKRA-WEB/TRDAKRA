@@ -1131,7 +1131,7 @@
                         <button onclick="${isUnassigned ? '' : `setSurveyFloor('${f}')`}" ${isUnassigned ? 'disabled' : ''}
                             class="bg-white rounded-2xl p-4 shadow-sm border ${isUnassigned ? 'border-slate-100 opacity-60 cursor-not-allowed' : 'border-slate-100 hover:border-brand-blue hover:shadow-md active:scale-95'} transition-all text-left">
                             <div class="flex items-center justify-between mb-2">
-                                <span class="text-lg font-bold ${isUnassigned ? 'text-slate-400' : 'text-brand-blue'}">🏠 ${f}</span>
+                                <span class="text-lg font-bold ${isUnassigned ? 'text-slate-400' : 'text-brand-blue'}">🏠 ${/^\d+$/.test(f) ? 'ชั้น ' + f : f}</span>
                                 <span class="material-icons-round text-slate-300 text-[18px]">${isUnassigned ? 'lock' : 'chevron_right'}</span>
                             </div>
                             <p class="text-[11px] text-slate-500 font-medium">${floors[f].total} รายการ${floors[f].nopar > 0 ? ` • <span class="text-amber-500">${floors[f].nopar} ยังไม่ตั้ง Par</span>` : ''}</p>
@@ -1212,7 +1212,7 @@
                         <header class="bg-brand-blue text-white p-4 flex items-center gap-2 sticky top-0 z-20 shadow-md">
                             <button onclick="state.surveyView='floors'; render()" class="p-1.5 rounded-full hover:bg-black/10 transition-colors"><span class="material-icons-round">arrow_back</span></button>
                             <div class="flex-1">
-                                <h1 class="text-[16px] font-bold">🏠 ${state.surveyFloor}</h1>
+                                <h1 class="text-[16px] font-bold">🏠 ${/^\d+$/.test(state.surveyFloor) ? 'ชั้น ' + state.surveyFloor : state.surveyFloor}</h1>
                                 <p class="text-[11px] text-white/70">${floorProducts.length} รายการ</p>
                             </div>
                         </header>
@@ -1256,7 +1256,7 @@
                         </header>
                         <main class="flex-1 overflow-y-auto p-5 pb-36 space-y-4 animate-fade-in">
                             <div class="bg-brand-blue/5 rounded-2xl p-4 border border-brand-blue/10 text-center">
-                                <p class="text-xs text-brand-blue font-semibold">จากชั้น <span class="font-extrabold">${state.surveyFloor}</span></p>
+                                <p class="text-xs text-brand-blue font-semibold">จากชั้น <span class="font-extrabold">${/^\d+$/.test(state.surveyFloor) ? 'ชั้น ' + state.surveyFloor : state.surveyFloor}</span></p>
                                 <p class="text-2xl font-extrabold text-brand-blue mt-1">${list.length} <span class="text-sm font-medium">รายการ</span></p>
                                 <p class="text-xs text-brand-orange font-semibold">${list.reduce((s,i) => s + i.needOrder, 0)} ${state.products.find(p => p.name === list[0]?.name)?.unit || 'หน่วย'} รวม</p>
                             </div>
@@ -1543,6 +1543,7 @@
             const edit = state.locationEdits[prod.name] || {};
             const currentFloor    = edit.floor    !== undefined ? edit.floor    : (prod.floor    || '');
             const currentLocation = edit.location !== undefined ? edit.location : (prod.location || '');
+            const currentParLevel = edit.parLevel !== undefined ? edit.parLevel : (prod.parLevel || '');
             const hasPending = !!state.locationEdits[prod.name];
             const isMissing  = !prod.floor;
             const enc = encodeURIComponent(prod.name);
@@ -1572,6 +1573,12 @@
                                 oninput="updateLocationEdit(decodeURIComponent('${enc}'), 'location', this.value)"
                                 class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
                         </div>
+                        <div class="col-span-2">
+                            <label class="block text-[10px] font-bold text-brand-orange uppercase tracking-wider mb-1">📦 Par Level (${prod.unit || 'หน่วย'})</label>
+                            <input type="number" min="0" value="${currentParLevel}" placeholder="ยอดสต๊อกเต็ม"
+                                oninput="updateLocationEdit(decodeURIComponent('${enc}'), 'parLevel', this.value)"
+                                class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-orange transition-all text-center font-bold">
+                        </div>
                     </div>
                 </div>`;
         }
@@ -1600,7 +1607,8 @@
                 const existing = state.products.find(p => p.name === productName) || {};
                 state.locationEdits[productName] = {
                     floor:    existing.floor    || '',
-                    location: existing.location || ''
+                    location: existing.location || '',
+                    parLevel: existing.parLevel || ''
                 };
             }
             state.locationEdits[productName][field] = value;
@@ -1628,9 +1636,9 @@
 
             for (const [productName, edits] of entries) {
                 const existing = getProductDetails(productName);
-                const floor    = edits.floor    || existing.floor    || '';
-                const location = edits.location || existing.location || '';
-                const parLevel = existing.parLevel || 0;
+                const floor    = edits.floor    !== undefined ? edits.floor    : (existing.floor    || '');
+                const location = edits.location !== undefined ? edits.location : (existing.location || '');
+                const parLevel = edits.parLevel !== undefined && edits.parLevel !== '' ? parseInt(edits.parLevel) : (existing.parLevel || 0);
                 try {
                     await pushProductDetails(productName, floor, location, parLevel);
                     successCount++;
