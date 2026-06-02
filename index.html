@@ -200,6 +200,7 @@
             // Location Manager State
             locationSearch: '',
             locationShowAll: false,
+            locationTab: 'missing',   // 'missing' | 'nostk'
             locationEdits: {}         // { productName: { floor, location } }
         };
 
@@ -463,6 +464,7 @@
             if (viewName === 'location') {
                 state.locationSearch = '';
                 state.locationShowAll = false;
+                state.locationTab = 'missing';
                 state.locationEdits = {};
             }
             if (viewName === 'survey') {
@@ -1565,6 +1567,7 @@
                                 class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
                                 <option value="" ${!currentFloor ? 'selected' : ''}>-- เลือก --</option>
                                 ${['1','2','3','4','5'].map(f => `<option value="${f}" ${currentFloor === f ? 'selected' : ''}>ชั้น ${f}</option>`).join('')}
+                                <option value="NOSTK" ${currentFloor === 'NOSTK' ? 'selected' : ''}>❌ ไม่มีพื้นที่จัดหน้าร้าน</option>
                             </select>
                         </div>
                         <div>
@@ -1580,9 +1583,9 @@
         function updateLocationSearch(value) {
             state.locationSearch = value;
             const search = value.toLowerCase().trim();
-            // When searching: scan all products. When empty: show missing only (up to 20).
+            // When searching: scan non-NOSTK products. When empty: show missing only (up to 20).
             const filtered = search
-                ? state.products.filter(p => p.name.toLowerCase().includes(search))
+                ? state.products.filter(p => p.floor !== 'NOSTK' && p.name.toLowerCase().includes(search))
                 : state.products.filter(p => !p.floor).slice(0, 20);
             const listEl = document.getElementById('location-list');
             if (!listEl) return;
@@ -1658,29 +1661,40 @@
 
         function renderLocationManager() {
             const search = (state.locationSearch || '').toLowerCase().trim();
-            const missingList = state.products.filter(p => !p.floor);
-            const missingCount = missingList.length;
+            const tab = state.locationTab;
             const editCount = Object.keys(state.locationEdits).length;
 
-            // What to show in the list
-            let displayList;
-            let showAllBtn = '';
+            const missingList = state.products.filter(p => !p.floor);
+            const nostkList   = state.products.filter(p => p.floor === 'NOSTK');
+            const missingCount = missingList.length;
+            const nostkCount   = nostkList.length;
+
+            // List logic
+            let displayList, showAllBtn = '';
             if (search) {
-                displayList = state.products.filter(p => p.name.toLowerCase().includes(search));
-            } else if (state.locationShowAll) {
-                displayList = state.products;
+                // Search scans all products except NOSTK for clarity; show all when searching
+                displayList = state.products.filter(p => p.floor !== 'NOSTK' && p.name.toLowerCase().includes(search));
+            } else if (tab === 'nostk') {
+                displayList = nostkList;
             } else {
-                displayList = missingList.slice(0, 20);
-                if (missingCount > 20 || state.products.length > 0) {
+                // missing tab — default 20, show-all button
+                displayList = state.locationShowAll ? missingList : missingList.slice(0, 20);
+                if (!state.locationShowAll && missingCount > 20) {
                     showAllBtn = `
                         <button onclick="state.locationShowAll=true; render()" class="w-full mt-2 py-3 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-500 hover:bg-slate-50 transition-all flex items-center justify-center gap-2">
-                            <span class="material-icons-round text-[16px]">list</span>
-                            ดูสินค้าทั้งหมด ${state.products.length} รายการ
+                            <span class="material-icons-round text-[16px]">expand_more</span>
+                            แสดงทั้งหมด ${missingCount} รายการ
                         </button>`;
                 }
             }
 
             const rows = displayList.map(renderLocationRow).join('');
+
+            const emptyMsg = search
+                ? 'ไม่พบสินค้าที่ค้นหา'
+                : tab === 'nostk'
+                    ? 'ยังไม่มีสินค้าที่ถูกระบุว่าไม่มีพื้นที่จัด'
+                    : 'สินค้าทุกรายการมีโลเคชั่นแล้ว 🎉';
 
             return `
                 <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative animate-fade-in">
@@ -1698,24 +1712,38 @@
                         </button>
                     </header>
 
+                    <!-- Search -->
                     <div class="p-4 bg-white border-b border-slate-100 sticky top-[60px] z-10 shadow-sm">
-                        <input type="text" value="${state.locationSearch}" placeholder="🔍 ค้นหาชื่อสินค้าที่ต้องการระบุโลเคชั่น..."
+                        <input type="text" value="${state.locationSearch}" placeholder="🔍 ค้นหาชื่อสินค้า..."
                             oninput="updateLocationSearch(this.value)"
                             class="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:border-brand-blue focus:bg-white transition-all">
                     </div>
 
+                    <!-- Tabs (hidden when searching) -->
+                    ${!search ? `
+                    <div class="flex bg-white border-b border-slate-100 px-2">
+                        <button onclick="state.locationTab='missing'; state.locationShowAll=false; render()" class="flex-1 py-3 text-[12px] font-semibold border-b-2 transition-all ${tab === 'missing' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400'}">
+                            ยังไม่มีโลเคชั่น
+                            ${missingCount > 0 ? `<span class="ml-1 bg-rose-100 text-rose-600 text-[10px] px-1.5 py-0.5 rounded-full">${missingCount}</span>` : ''}
+                        </button>
+                        <button onclick="state.locationTab='nostk'; render()" class="flex-1 py-3 text-[12px] font-semibold border-b-2 transition-all ${tab === 'nostk' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400'}">
+                            ไม่มีพื้นที่จัด
+                            ${nostkCount > 0 ? `<span class="ml-1 bg-slate-100 text-slate-500 text-[10px] px-1.5 py-0.5 rounded-full">${nostkCount}</span>` : ''}
+                        </button>
+                    </div>` : ''}
+
+                    <!-- Context label -->
+                    ${tab === 'nostk' && !search ? `
+                    <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+                        <p class="text-[11px] text-slate-500">สินค้าในกลุ่มนี้ไม่ได้เก็บสต๊อกหน้าร้าน เช่น ของแช่ฟรีซ หรือสินค้าคลังนอก จะไม่ถูกนับในระบบสำรวจ</p>
+                    </div>` : ''}
+
                     <main id="location-list" class="flex-1 overflow-y-auto p-4 ${editCount > 0 ? 'pb-36' : 'pb-6'}">
-                        ${!search && !state.locationShowAll ? `
-                            <p class="text-[11px] text-slate-400 font-medium mb-3 px-1">
-                                ⚠️ สินค้าที่ยังไม่มีโลเคชั่น
-                                <span class="font-bold text-rose-500">${missingCount} รายการ</span>
-                                ${missingCount > 20 ? `<span class="text-slate-300">· แสดง 20 รายการแรก</span>` : ''}
-                            </p>` : ''}
-                        ${search ? `<p class="text-[11px] text-slate-400 font-medium mb-3 px-1">ผลการค้นหา <span class="font-bold text-brand-blue">${displayList.length} รายการ</span></p>` : ''}
+                        ${search ? `<p class="text-[11px] text-slate-400 font-medium mb-3 px-1">ผลการค้นหา <span class="font-bold text-brand-blue">${displayList.length} รายการ</span> (ไม่รวมกลุ่มไม่มีพื้นที่จัด)</p>` : ''}
                         ${displayList.length === 0
                             ? `<div class="flex flex-col items-center justify-center py-16 text-slate-400">
                                 <span class="material-icons-round text-[40px] mb-2">check_circle_outline</span>
-                                <p class="text-sm font-medium">${search ? 'ไม่พบสินค้าที่ค้นหา' : 'สินค้าทุกรายการมีโลเคชั่นแล้ว 🎉'}</p>
+                                <p class="text-sm font-medium text-center px-4">${emptyMsg}</p>
                                </div>`
                             : rows + showAllBtn}
                     </main>
