@@ -206,7 +206,8 @@
             checkStockLocation: null,
             checkStockEdits: {}, // { productName: { checked: true, currentStock: '', requestQty: '' } }
             checkStockSearch: '',
-            checkStockCheckedLocations: JSON.parse(localStorage.getItem('TRDAKRA_CHECKED_LOCATIONS') || '{}')
+            checkStockCheckedLocations: JSON.parse(localStorage.getItem('TRDAKRA_CHECKED_LOCATIONS') || '{}'),
+            checkStockSubmitting: false
         };
 
         function showLoading(text = 'กำลังทำงาน...') {
@@ -449,7 +450,7 @@
             return 'หน่วย';
         }
 
-        async function fetchInitialData(isRefresh = false) {
+        async function fetchInitialData(isRefresh = false, skipHideLoading = false) {
             if (!APPS_SCRIPT_URL) { hideLoading(); alert('กรุณาใส่ APPS_SCRIPT_URL ก่อนใช้งาน'); return; }
             if (!isRefresh) {
                 const cached = getCache('TRDAKRA_DATA', TRD_CACHE_TTL);
@@ -487,10 +488,14 @@
             } catch (error) {
                 console.error('Error fetching data:', error);
                 if (!getCache('TRDAKRA_DATA', TRD_CACHE_TTL)) alert('ไม่สามารถเชื่อมต่อกับฐานข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
-            } finally { hideLoading(); }
+            } finally {
+                if (!skipHideLoading) {
+                    hideLoading();
+                }
+            }
         }
 
-        async function syncDataToSheet() {
+        async function syncDataToSheet(skipHideLoading = false) {
             if (!APPS_SCRIPT_URL) return;
             showLoading('กำลังบันทึกข้อมูล...');
             try {
@@ -500,7 +505,11 @@
                 });
             } catch (error) {
                 console.error('Error saving data:', error); alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
-            } finally { hideLoading(); }
+            } finally {
+                if (!skipHideLoading) {
+                    hideLoading();
+                }
+            }
         }
 
         // ==========================================
@@ -1833,6 +1842,8 @@
         }
 
         async function handleCheckStockSubmit() {
+            if (state.checkStockSubmitting) return; // Prevent double submission
+            
             const locObj = state.checkStockLocation;
             if (!locObj) return;
             const loc = locObj.location;
@@ -1860,6 +1871,9 @@
                 alert('กรุณากรอกจำนวนเดิมที่เหลืออยู่ (หรือระบุจำนวนสั่งเบิกในตัวที่ไม่มี Par Level) ให้ครบสำหรับรายการที่ติ๊กเลือก');
                 return;
             }
+
+            state.checkStockSubmitting = true;
+            showLoading('กำลังส่งรายงานและสั่งเบิก...');
 
             const now = new Date();
             const timestamp = formatDateTime(now.toISOString());
@@ -1912,16 +1926,15 @@
                 }
             });
 
-            showLoading('กำลังส่งรายงานและสั่งเบิก...');
-
             try {
                 // 1. Submit orders if any
                 if (newOrders.length > 0) {
                     state.items = [...newOrders, ...state.items];
-                    await syncDataToSheet();
+                    await syncDataToSheet(true); // skipHideLoading = true
                 }
 
                 // 2. Submit survey log
+                showLoading('กำลังบันทึกประวัติการสำรวจ...');
                 await fetch(APPS_SCRIPT_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -1935,10 +1948,6 @@
 
                 // Invalidate cache
                 localStorage.removeItem('TRDAKRA_DATA');
-                hideLoading();
-
-                alert(`✅ บันทึกสต๊อกสำเร็จ!\nส่งสั่งเบิก ${newOrders.length} รายการ จากโลเคชั่น ชั้น ${floor} - ${loc}`);
-                sendAppLog('ตรวจสต๊อกรายโลเคชั่น', `โลเคชั่น ชั้น ${floor} - ${loc}: ส่งเบิก ${newOrders.length} รายการ`);
 
                 // Mark location as checked
                 const compoundKey = `${floor}|${loc}`;
@@ -1946,14 +1955,25 @@
                 state.checkStockCheckedLocations[compoundKey] = new Date().toISOString();
                 localStorage.setItem('TRDAKRA_CHECKED_LOCATIONS', JSON.stringify(state.checkStockCheckedLocations));
 
-                // Reset and go back to location selector page
+                // Go back to location selector page immediately so it's ready behind loader
                 state.checkStockLocation = null;
                 state.checkStockEdits = {};
-                fetchInitialData(true);
+                render();
+                
+                // Refresh data with loading screen still visible
+                showLoading('กำลังรีเฟรชข้อมูลแผนผัง...');
+                await fetchInitialData(true, true); // skipHideLoading = true
+
+                // Show alert while loading is still covering the screen
+                alert(`✅ บันทึกสต๊อกสำเร็จ!\nส่งสั่งเบิก ${newOrders.length} รายการ จากโลเคชั่น ชั้น ${floor} - ${loc}`);
+                sendAppLog('ตรวจสต๊อกรายโลเคชั่น', `โลเคชั่น ชั้น ${floor} - ${loc}: ส่งเบิก ${newOrders.length} รายการ`);
             } catch (err) {
                 console.error(err);
-                hideLoading();
                 alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง');
+            } finally {
+                hideLoading();
+                state.checkStockSubmitting = false;
+                render();
             }
         }
 
