@@ -604,9 +604,16 @@
             const item = state.items.find(i => i.id === id);
             if (!item) return;
             const cur = getEffectiveState(item);
-            if (cur === 'pending')       state.w2BatchEdits[id] = 'dispatch';
-            else if (cur === 'dispatch') state.w2BatchEdits[id] = 'outstock';
-            else                         delete state.w2BatchEdits[id];
+            if (cur === 'pending') {
+                state.w2BatchEdits[id] = 'dispatch';
+            } else if (cur === 'dispatch') {
+                state.w2BatchEdits[id] = 'outstock';
+            } else {
+                // outstock → ถ้า item เดิมเป็น สินค้าหมด ให้วนไป dispatch ได้ (สต๊อกเข้าแล้ว)
+                // ถ้า item เดิมเป็น pending ให้ delete กลับ pending
+                if (item.status === 'สินค้าหมด') state.w2BatchEdits[id] = 'dispatch';
+                else delete state.w2BatchEdits[id];
+            }
             render();
         }
         function setDashboardFilter(val) {
