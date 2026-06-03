@@ -207,6 +207,8 @@
             checkStockSearch: '',
             checkStockCheckedLocations: JSON.parse(localStorage.getItem('TRDAKRA_CHECKED_LOCATIONS') || '{}'),
             checkStockSubmitting: false,
+            checkStockEditingPar: null,
+            checkStockParInput: '',
             // Analytics Dashboard
             dashboardTab: 'summary',
             calendarMonth: new Date().getMonth(),
@@ -2310,6 +2312,27 @@
             state.checkStockEdits[productName].requestQty = val;
         }
 
+        function openParEdit(productName) {
+            const prod = state.products.find(p => p.name === productName);
+            state.checkStockEditingPar = productName;
+            state.checkStockParInput = prod ? String(prod.parLevel || '') : '';
+            render();
+        }
+
+        async function saveParEdit(productName) {
+            const val = parseInt(state.checkStockParInput) || 0;
+            const prod = state.products.find(p => p.name === productName);
+            if (!prod) { state.checkStockEditingPar = null; render(); return; }
+            try {
+                await pushProductDetails(productName, prod.floor || '', prod.location || '', val);
+                const idx = state.products.findIndex(p => p.name === productName);
+                if (idx !== -1) state.products[idx].parLevel = val;
+            } catch(e) { alert('บันทึกไม่สำเร็จ'); }
+            state.checkStockEditingPar = null;
+            state.checkStockParInput = '';
+            render();
+        }
+
         function updateCheckStockSearch(value) {
             state.checkStockSearch = value;
             const search = value.toLowerCase().trim();
@@ -2495,10 +2518,26 @@
                          class="flex justify-between items-center gap-3 p-4 cursor-pointer active:bg-indigo-50/60 transition-colors select-none">
                         <div class="flex-1 min-w-0">
                             <h4 class="text-sm font-bold ${checked ? 'text-brand-blue' : 'text-slate-800'} leading-snug">${prod.name}</h4>
-                            <div class="flex items-center gap-1.5 mt-1.5">
-                                <span class="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
-                                    Par: ${par > 0 ? `${par} ${prod.unit}` : 'ยังไม่ตั้ง Par ⚠️'}
-                                </span>
+                            <div class="flex items-center gap-1.5 mt-1.5" onclick="event.stopPropagation()">
+                                ${state.checkStockEditingPar === prod.name ? `
+                                    <input type="number" min="0" value="${state.checkStockParInput}"
+                                        oninput="state.checkStockParInput=this.value"
+                                        onkeydown="if(event.key==='Enter') saveParEdit(decodeURIComponent('${enc}'))"
+                                        autofocus
+                                        class="w-20 px-2 py-0.5 text-[11px] font-bold border border-brand-blue rounded-lg text-center focus:outline-none">
+                                    <button onclick="saveParEdit(decodeURIComponent('${enc}'))"
+                                        class="text-[9px] font-bold bg-brand-blue text-white px-2 py-0.5 rounded-full active:scale-95">✓</button>
+                                    <button onclick="state.checkStockEditingPar=null; render()"
+                                        class="text-[9px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full active:scale-95">✕</button>
+                                ` : `
+                                    <span class="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
+                                        Par: ${par > 0 ? `${par} ${prod.unit}` : 'ยังไม่ตั้ง ⚠️'}
+                                    </span>
+                                    <button onclick="openParEdit(decodeURIComponent('${enc}'))"
+                                        class="text-[9px] text-slate-400 hover:text-brand-blue transition-colors flex items-center gap-0.5">
+                                        <span class="material-icons-round text-[12px]">edit</span>
+                                    </button>
+                                `}
                             </div>
                         </div>
                         <div class="w-8 h-8 flex-shrink-0 flex items-center justify-center text-sm font-bold rounded-lg ${boxClass}">${boxContent}</div>
