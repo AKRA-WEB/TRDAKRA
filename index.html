@@ -2484,25 +2484,28 @@
 
             const cardBg = checked ? 'bg-indigo-50/50 border-indigo-200 border-2' : 'bg-white border-slate-100 border';
 
+            const boxClass = checked
+                ? 'bg-brand-blue text-white'
+                : 'border-2 border-slate-200 bg-white';
+            const boxContent = checked ? '✓' : '';
+
             return `
-                <div class="p-4 rounded-2xl ${cardBg} shadow-sm transition-all duration-200 flex flex-col gap-3 mb-3">
-                    <div class="flex justify-between items-start gap-3">
+                <div class="rounded-2xl ${cardBg} shadow-sm transition-all duration-200 flex flex-col mb-3 overflow-hidden">
+                    <div onclick="toggleCheckStockItem(decodeURIComponent('${enc}'))"
+                         class="flex justify-between items-center gap-3 p-4 cursor-pointer active:bg-indigo-50/60 transition-colors select-none">
                         <div class="flex-1 min-w-0">
-                            <h4 class="text-sm font-bold text-slate-800 leading-snug">${prod.name}</h4>
+                            <h4 class="text-sm font-bold ${checked ? 'text-brand-blue' : 'text-slate-800'} leading-snug">${prod.name}</h4>
                             <div class="flex items-center gap-1.5 mt-1.5">
                                 <span class="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
                                     Par: ${par > 0 ? `${par} ${prod.unit}` : 'ยังไม่ตั้ง Par ⚠️'}
                                 </span>
                             </div>
                         </div>
-                        <div class="flex-shrink-0 flex items-center h-full">
-                            <input type="checkbox" onchange="toggleCheckStockItem(decodeURIComponent('${enc}'))" ${checked ? 'checked' : ''}
-                                class="w-6 h-6 rounded-lg border-slate-300 text-brand-blue focus:ring-brand-blue cursor-pointer">
-                        </div>
+                        <div class="w-8 h-8 flex-shrink-0 flex items-center justify-center text-sm font-bold rounded-lg ${boxClass}">${boxContent}</div>
                     </div>
 
                     ${checked ? `
-                    <div class="pt-3 border-t border-dashed border-indigo-100 space-y-3 animate-fade-in">
+                    <div class="px-4 pb-4 pt-3 border-t border-dashed border-indigo-100 space-y-3 animate-fade-in">
                         ${par > 0 ? `
                         <div>
                             <label class="block text-[10px] font-bold text-indigo-700 uppercase tracking-wider mb-1">
@@ -2541,9 +2544,9 @@
                         `}
                     </div>
                     ` : `
-                    <div class="text-[10px] font-semibold text-slate-400 flex items-center gap-1.5 pl-0.5 mt-0.5">
+                    <div class="px-4 pb-3 text-[10px] font-semibold text-slate-400 flex items-center gap-1.5">
                         <span class="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
-                        มีของเยอะอยู่ (ไม่ระบุเบิก)
+                        กดเพื่อสั่งเบิก
                     </div>
                     `}
                 </div>`;
