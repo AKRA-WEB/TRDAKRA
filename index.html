@@ -74,7 +74,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260602.02";
+        const CURRENT_VERSION = "20260602.03";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -195,14 +195,12 @@
             w1Rows: [{ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' }],
             // Location Manager State
             locationSearch: '',
-            locationShowAll: false,
-            locationEdits: {},
             locationFloorFilter: '',
             locationZoneFilter: '',
-            locationAddMode: false,
-            locationAddSearch: '',
-            locationNewZoneMode: false,
-            locationNewZoneInput: '',
+            locationSheet: null,
+            locationSheetFloor: '',
+            locationSheetZoneInput: '',
+            locationSheetParLevel: '',
             // Check Stock State
             checkStockLocation: null,
             checkStockEdits: {}, // { productName: { checked: true, currentStock: '', requestQty: '' } }
@@ -371,49 +369,59 @@
         function setLocationFloor(floor) {
             state.locationFloorFilter = state.locationFloorFilter === floor ? '' : floor;
             state.locationZoneFilter = '';
-            state.locationAddMode = false;
-            state.locationNewZoneMode = false;
-            state.locationNewZoneInput = '';
             state.locationSearch = '';
-            render();
-        }
-
-        function confirmNewZone() {
-            const z = (state.locationNewZoneInput || '').trim().toUpperCase();
-            if (!z) return;
-            state.locationZoneFilter = z;
-            state.locationNewZoneMode = false;
-            state.locationNewZoneInput = '';
             render();
         }
 
         function setLocationZone(zone) {
             state.locationZoneFilter = state.locationZoneFilter === zone ? '' : zone;
-            state.locationAddMode = false;
             render();
         }
 
-        function toggleLocationAddMode() {
-            state.locationAddMode = !state.locationAddMode;
-            state.locationAddSearch = '';
+        function openLocationSheet(productName) {
+            const prod = state.products.find(p => p.name === productName) || {};
+            state.locationSheet = { name: productName };
+            state.locationSheetFloor = prod.floor || '';
+            state.locationSheetZoneInput = prod.location || '';
+            state.locationSheetParLevel = prod.parLevel ? String(prod.parLevel) : '';
             render();
         }
 
-        function addProductToCurrentZone(productName) {
-            const floor = state.locationFloorFilter;
-            const zone  = state.locationZoneFilter;
-            if (!floor || !zone) return;
-            if (!state.locationEdits[productName]) {
-                const existing = state.products.find(p => p.name === productName) || {};
-                state.locationEdits[productName] = { floor, location: zone, parLevel: existing.parLevel || '' };
-            } else {
-                state.locationEdits[productName].floor    = floor;
-                state.locationEdits[productName].location = zone;
+        function closeLocationSheet() {
+            state.locationSheet = null;
+            state.locationSheetFloor = '';
+            state.locationSheetZoneInput = '';
+            state.locationSheetParLevel = '';
+            render();
+        }
+
+        function setSheetFloor(floor) {
+            state.locationSheetFloor = floor;
+            state.locationSheetZoneInput = '';
+            render();
+        }
+
+        async function confirmLocationSheet() {
+            const name     = state.locationSheet ? state.locationSheet.name : null;
+            const floor    = state.locationSheetFloor;
+            const zone     = (state.locationSheetZoneInput || '').trim().toUpperCase();
+            const parLevel = parseInt(state.locationSheetParLevel) || 0;
+
+            if (!name || !floor) return;
+            if (floor !== 'NOSTK' && !zone) return;
+
+            showLoading('กำลังบันทึกโลเคชั่น...');
+            try {
+                await pushProductDetails(name, floor, floor === 'NOSTK' ? '' : zone, parLevel);
+                localStorage.removeItem('TRDAKRA_DATA');
+                sendAppLog('จัดโลเคชั่นสินค้า', `${name} → ชั้น ${floor} โซน ${zone}`);
+            } catch(e) {
+                hideLoading();
+                alert('บันทึกไม่สำเร็จ กรุณาลองใหม่');
+                return;
             }
-            const idx = state.products.findIndex(p => p.name === productName);
-            if (idx !== -1) { state.products[idx].floor = floor; state.products[idx].location = zone; }
-            state.locationAddSearch = '';
-            render();
+            hideLoading();
+            closeLocationSheet();
         }
 
         function parseFormattedDate(str) {
@@ -568,14 +576,12 @@
             }
             if (viewName === 'location') {
                 state.locationSearch = '';
-                state.locationShowAll = false;
-                state.locationEdits = {};
                 state.locationFloorFilter = '';
                 state.locationZoneFilter = '';
-                state.locationAddMode = false;
-                state.locationAddSearch = '';
-                state.locationNewZoneMode = false;
-                state.locationNewZoneInput = '';
+                state.locationSheet = null;
+                state.locationSheetFloor = '';
+                state.locationSheetZoneInput = '';
+                state.locationSheetParLevel = '';
             }
             if (viewName === 'check_stock') {
                 state.checkStockLocation = null;
@@ -1955,47 +1961,135 @@
         }
 
         // ── Render: Location Manager ──
-        function renderLocationRow(prod) {
-            const edit = state.locationEdits[prod.name] || {};
-            const currentFloor    = edit.floor    !== undefined ? edit.floor    : (prod.floor    || '');
-            const currentLocation = edit.location !== undefined ? edit.location : (prod.location || '');
-            const currentParLevel = edit.parLevel !== undefined ? edit.parLevel : (prod.parLevel || '');
-            const hasPending = !!state.locationEdits[prod.name];
-            const isMissing  = !prod.floor;
-            const enc = encodeURIComponent(prod.name);
-            const borderClass = hasPending
-                ? 'border-brand-blue border-2'
-                : isMissing ? 'border-rose-200' : 'border-slate-100';
+        function renderLocationSheet() {
+            if (!state.locationSheet) return '';
+            const { name } = state.locationSheet;
+            const floor = state.locationSheetFloor;
+            const zone  = state.locationSheetZoneInput || '';
+            const par   = state.locationSheetParLevel  || '';
+            const FLOORS = ['1','2','3','4','5'];
+
+            let existingZones = [];
+            if (floor && floor !== 'NOSTK') {
+                const zSet = new Set();
+                state.products.filter(p => p.floor === floor && p.location)
+                    .forEach(p => { const z = extractZone(p.location); if (z) zSet.add(z); });
+                existingZones = [...zSet].sort();
+            }
+
+            const canSave = !!(floor && (floor === 'NOSTK' || zone.trim()));
+            const saveLbl = floor
+                ? (floor === 'NOSTK' ? ' (NOSTK)' : (zone ? ` ชั้น ${floor} › ${zone}` : ''))
+                : '';
+
             return `
-                <div class="bg-white p-4 rounded-2xl ${borderClass} border shadow-sm mb-3">
-                    <div class="flex items-start justify-between gap-2 mb-3">
-                        <h3 class="font-bold text-brand-blue text-sm leading-snug flex-1">${prod.name}</h3>
-                        ${isMissing && !hasPending ? '<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-500 border border-rose-200 flex-shrink-0">ไม่มีโลเคชั่น</span>' : ''}
-                        ${hasPending ? '<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-brand-blue/10 text-brand-blue border border-brand-blue/20 flex-shrink-0">✏️ รอบันทึก</span>' : ''}
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
+                <div onclick="closeLocationSheet()" class="fixed inset-0 bg-black/40 z-40"></div>
+                <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white rounded-t-[2rem] z-50 shadow-2xl" style="max-height:90vh;overflow-y:auto">
+                    <div class="flex items-center justify-between p-4 border-b border-slate-100">
                         <div>
-                            <label class="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-1">📍 ชั้น</label>
-                            <select onchange="updateLocationEdit(decodeURIComponent('${enc}'), 'floor', this.value)"
-                                class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
-                                <option value="" ${!currentFloor ? 'selected' : ''}>-- เลือก --</option>
-                                ${['1','2','3','4','5'].map(f => `<option value="${f}" ${currentFloor === f ? 'selected' : ''}>ชั้น ${f}</option>`).join('')}
-                                <option value="NOSTK" ${currentFloor === 'NOSTK' ? 'selected' : ''}>❌ ไม่มีพื้นที่จัดหน้าร้าน</option>
-                            </select>
+                            <p class="text-[11px] font-semibold text-slate-400">กำหนดโลเคชั่น</p>
+                            <p class="text-sm font-bold text-brand-blue truncate" style="max-width:260px">${name}</p>
                         </div>
+                        <button onclick="closeLocationSheet()" class="p-2 rounded-full hover:bg-slate-100 transition-colors">
+                            <span class="material-icons-round text-slate-400">close</span>
+                        </button>
+                    </div>
+
+                    <div class="p-4 space-y-5 pb-8">
                         <div>
-                            <label class="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-1">📍 โลเคชั่น</label>
-                            <input type="text" value="${currentLocation}" placeholder="เช่น A-01-1"
-                                oninput="updateLocationEdit(decodeURIComponent('${enc}'), 'location', this.value)"
-                                class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
+                            <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">เลือกชั้น</p>
+                            <div class="grid grid-cols-3 gap-2">
+                                ${FLOORS.map(f => `
+                                    <button onclick="setSheetFloor('${f}')"
+                                            class="py-3 rounded-2xl text-sm font-bold transition-all active:scale-95
+                                                   ${floor === f ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/30' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">
+                                        ชั้น ${f}
+                                    </button>
+                                `).join('')}
+                                <button onclick="setSheetFloor('NOSTK')"
+                                        class="py-3 rounded-2xl text-sm font-bold transition-all active:scale-95
+                                               ${floor === 'NOSTK' ? 'bg-slate-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">
+                                    ❌ NOSTK
+                                </button>
+                            </div>
                         </div>
-                        <div class="col-span-2">
-                            <label class="block text-[10px] font-bold text-brand-orange uppercase tracking-wider mb-1">📦 Par Level (${prod.unit || 'หน่วย'})</label>
-                            <input type="number" min="0" value="${currentParLevel}" placeholder="ยอดสต๊อกเต็ม"
-                                oninput="updateLocationEdit(decodeURIComponent('${enc}'), 'parLevel', this.value)"
-                                class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-orange transition-all text-center font-bold">
+
+                        ${floor && floor !== 'NOSTK' ? `
+                        <div>
+                            <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">เลือกโซน</p>
+                            ${existingZones.length > 0 ? `
+                            <div class="flex flex-wrap gap-2 mb-3">
+                                ${existingZones.map(z => `
+                                    <button onclick="state.locationSheetZoneInput='${z}'; render()"
+                                            class="px-3 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95
+                                                   ${zone === z ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'}">
+                                        ${z}
+                                    </button>
+                                `).join('')}
+                            </div>` : ''}
+                            <input type="text" value="${zone}"
+                                placeholder="พิมพ์ชื่อโซน เช่น 1B, 2A-03..."
+                                oninput="state.locationSheetZoneInput=this.value.toUpperCase(); render()"
+                                class="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold uppercase focus:border-indigo-500 focus:bg-white transition-all"
+                                autocomplete="off">
+                        </div>` : ''}
+
+                        <div>
+                            <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Par Level <span class="font-normal normal-case text-slate-400">(ไม่บังคับ)</span></p>
+                            <input type="number" min="0" value="${par}"
+                                placeholder="ยอดสต๊อกเต็ม"
+                                oninput="state.locationSheetParLevel=this.value"
+                                class="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-center focus:border-brand-orange focus:bg-white transition-all">
+                        </div>
+
+                        <button onclick="${canSave ? 'confirmLocationSheet()' : ''}"
+                                class="w-full py-4 rounded-2xl font-bold text-base transition-all active:scale-[0.98]
+                                       ${canSave ? 'bg-brand-blue text-white shadow-lg shadow-brand-blue/20' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}">
+                            ✓ บันทึก${saveLbl}
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderLocationRow(prod) {
+            const isMissing = !prod.floor;
+            const enc = encodeURIComponent(prod.name);
+            const borderClass = isMissing ? 'border-rose-200' : 'border-slate-100';
+
+            let locationChip = '';
+            if (prod.floor === 'NOSTK') {
+                locationChip = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">❌ NOSTK</span>`;
+            } else if (prod.floor && prod.location) {
+                locationChip = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">📍 ชั้น ${prod.floor} › ${prod.location}</span>`;
+            } else if (prod.floor) {
+                locationChip = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200">📍 ชั้น ${prod.floor}</span>`;
+            } else {
+                locationChip = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-500 border border-rose-200">🔴 ยังไม่มีโลเคชั่น</span>`;
+            }
+
+            const parBadge = prod.parLevel
+                ? `<span class="text-[10px] font-medium text-slate-400 ml-1">Par: <span class="font-bold text-slate-600">${prod.parLevel}</span></span>`
+                : '';
+
+            const btnLabel = isMissing ? '📍 กำหนด' : '✏️ แก้ไข';
+            const btnClass = isMissing
+                ? 'bg-indigo-600 text-white'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200';
+
+            return `
+                <div class="bg-white p-3.5 rounded-2xl ${borderClass} border shadow-sm mb-2.5 flex items-center justify-between gap-3">
+                    <div class="flex-1 min-w-0">
+                        <p class="font-bold text-brand-blue text-sm leading-snug truncate mb-1">${prod.name}</p>
+                        <div class="flex items-center flex-wrap gap-1">
+                            ${locationChip}
+                            ${parBadge}
                         </div>
                     </div>
+                    <button onclick="openLocationSheet(decodeURIComponent('${enc}'))"
+                            class="flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 ${btnClass}">
+                        ${btnLabel}
+                    </button>
                 </div>`;
         }
 
@@ -2005,7 +2099,7 @@
             // When searching: scan non-NOSTK products. When empty: show missing only (up to 20).
             const filtered = search
                 ? state.products.filter(p => p.floor !== 'NOSTK' && p.name.toLowerCase().includes(search))
-                : state.products.filter(p => !p.floor).slice(0, 20);
+                : state.products.filter(p => !p.floor);
             const listEl = document.getElementById('location-list');
             if (!listEl) return;
             if (filtered.length === 0) {
@@ -2018,79 +2112,14 @@
             }
         }
 
-        function updateLocationEdit(productName, field, value) {
-            if (!state.locationEdits[productName]) {
-                const existing = state.products.find(p => p.name === productName) || {};
-                state.locationEdits[productName] = {
-                    floor:    existing.floor    || '',
-                    location: existing.location || '',
-                    parLevel: existing.parLevel || ''
-                };
-            }
-            state.locationEdits[productName][field] = value;
-            const saveBar = document.getElementById('location-save-bar');
-            if (saveBar) {
-                const n = Object.keys(state.locationEdits).length;
-                saveBar.innerHTML = `
-                    <p class="text-[11px] text-center text-slate-400 mb-2">✏️ แก้ไขแล้ว ${n} รายการ รอ Save</p>
-                    <button onclick="handleLocationSave()" class="w-full bg-brand-blue text-white font-bold py-4 rounded-2xl shadow-lg shadow-brand-blue/20 active:scale-[0.98] transition-all">
-                        💾 บันทึกทั้งหมด (${n} รายการ)
-                    </button>`;
-                saveBar.classList.remove('hidden');
-            } else {
-                render();
-            }
-        }
-
-        async function handleLocationSave() {
-            const entries = Object.entries(state.locationEdits);
-            if (entries.length === 0) return;
-
-            showLoading(`กำลังบันทึกโลเคชั่น 0/${entries.length}...`);
-            let successCount = 0;
-            let failCount = 0;
-
-            for (const [productName, edits] of entries) {
-                const existing = getProductDetails(productName);
-                const floor    = edits.floor    !== undefined ? edits.floor    : (existing.floor    || '');
-                const location = edits.location !== undefined ? edits.location : (existing.location || '');
-                const parLevel = edits.parLevel !== undefined && edits.parLevel !== '' ? parseInt(edits.parLevel) : (existing.parLevel || 0);
-                try {
-                    await pushProductDetails(productName, floor, location, parLevel);
-                    successCount++;
-                } catch (e) {
-                    console.error('handleLocationSave failed for', productName, e);
-                    failCount++;
-                }
-                document.getElementById('loading-text').innerText =
-                    `กำลังบันทึกโลเคชั่น ${successCount + failCount}/${entries.length}...`;
-            }
-
-            state.locationEdits = {};
-            localStorage.removeItem('TRDAKRA_DATA');
-            hideLoading();
-
-            const msg = failCount > 0
-                ? `บันทึกสำเร็จ ${successCount} รายการ ล้มเหลว ${failCount} รายการ`
-                : `✅ บันทึกโลเคชั่นสำเร็จ ${successCount} รายการ`;
-            alert(msg);
-
-            sendAppLog('จัดโลเคชั่นสินค้า', `บันทึก ${successCount} รายการ`);
-            fetchInitialData(true);
-        }
-
         function renderLocationManager() {
-            const editCount    = Object.keys(state.locationEdits).length;
-            const floorF       = state.locationFloorFilter;
-            const zoneF        = state.locationZoneFilter;
-            const addMode      = state.locationAddMode;
-            const search       = (state.locationSearch   || '').toLowerCase().trim();
-            const addSearch    = (state.locationAddSearch || '').toLowerCase().trim();
-            const FLOORS       = ['1','2','3','4','5'];
+            const floorF  = state.locationFloorFilter;
+            const zoneF   = state.locationZoneFilter;
+            const search  = (state.locationSearch || '').toLowerCase().trim();
+            const FLOORS  = ['1','2','3','4','5'];
 
             const missingCount = state.products.filter(p => !p.floor).length;
 
-            // Zones available for selected floor
             let zones = [];
             if (floorF && floorF !== 'NOSTK') {
                 const zSet = new Set();
@@ -2099,8 +2128,7 @@
                 zones = [...zSet].sort();
             }
 
-            // Build main display list
-            let displayList = [], showAllBtn = '';
+            let displayList = [];
             if (search) {
                 displayList = state.products.filter(p => p.floor !== 'NOSTK' && p.name.toLowerCase().includes(search));
             } else if (floorF === 'NOSTK') {
@@ -2110,17 +2138,8 @@
             } else if (floorF) {
                 displayList = state.products.filter(p => p.floor === floorF);
             } else {
-                const missing = state.products.filter(p => !p.floor);
-                displayList = state.locationShowAll ? missing : missing.slice(0, 20);
-                if (!state.locationShowAll && missing.length > 20) {
-                    showAllBtn = `<button onclick="state.locationShowAll=true; render()" class="w-full mt-2 py-3 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-500 flex items-center justify-center gap-2"><span class="material-icons-round text-[16px]">expand_more</span>แสดงทั้งหมด ${missing.length} รายการ</button>`;
-                }
+                displayList = state.products.filter(p => !p.floor);
             }
-
-            // Products available to add (unassigned)
-            const addable = state.products.filter(p => !p.floor && (!addSearch || p.name.toLowerCase().includes(addSearch)));
-
-            const canAdd = !!(floorF && floorF !== 'NOSTK' && zoneF);
 
             const emptyMsg = search ? 'ไม่พบสินค้าที่ค้นหา'
                 : floorF === 'NOSTK' ? 'ยังไม่มีสินค้ากลุ่มนี้'
@@ -2142,13 +2161,11 @@
                                 ${floorF || zoneF ? `<p class="text-[11px] text-white/70 mt-0.5">${floorF ? (floorF === 'NOSTK' ? 'ไม่มีพื้นที่จัด' : 'ชั้น ' + floorF) : ''}${zoneF ? ' › โซน ' + zoneF : ''}</p>` : ''}
                             </div>
                         </div>
-                        <div class="flex items-center gap-2">
-                            ${canAdd ? `<button onclick="toggleLocationAddMode()" class="p-1.5 rounded-full transition-colors ${addMode ? 'bg-white/20 text-white' : 'hover:bg-black/10 text-white'}" title="เพิ่มสินค้าเข้าโซน"><span class="material-icons-round text-[22px]">${addMode ? 'close' : 'add_circle'}</span></button>` : ''}
-                            <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round text-[20px]">refresh</span></button>
-                        </div>
+                        <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
+                            <span class="material-icons-round text-[20px]">refresh</span>
+                        </button>
                     </header>
 
-                    <!-- Floor filter row -->
                     <div class="bg-white border-b border-slate-100 px-3 py-2.5 overflow-x-auto flex gap-2 shadow-sm">
                         <button onclick="setLocationFloor('')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${!floorF ? 'bg-rose-500 text-white' : 'bg-white border border-slate-200 text-slate-500'}">
                             ยังไม่มีโลเคชั่น ${missingCount > 0 ? `<span class="ml-1 ${!floorF ? 'bg-white/30 text-white' : 'bg-rose-100 text-rose-600'} text-[10px] px-1 rounded-full">${missingCount}</span>` : ''}
@@ -2160,7 +2177,6 @@
                         <button onclick="setLocationFloor('NOSTK')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${floorF === 'NOSTK' ? 'bg-slate-600 text-white' : 'bg-white border border-slate-200 text-slate-500'}">❌ NOSTK</button>
                     </div>
 
-                    <!-- Zone filter row (when floor selected, not NOSTK) -->
                     ${floorF && floorF !== 'NOSTK' ? `
                     <div class="bg-white border-b border-slate-100 px-3 py-2 overflow-x-auto flex gap-2">
                         <button onclick="setLocationZone('')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${!zoneF ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-500'}">ทุกโซน</button>
@@ -2168,73 +2184,30 @@
                             const cnt = state.products.filter(p => p.floor === floorF && extractZone(p.location) === z).length;
                             return `<button onclick="setLocationZone('${z}')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${zoneF === z ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-500'}">โซน ${z} (${cnt})</button>`;
                         }).join('')}
-                        <button onclick="state.locationNewZoneMode=!state.locationNewZoneMode; state.locationNewZoneInput=''; render()" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all flex items-center gap-1 ${state.locationNewZoneMode ? 'bg-slate-400 text-white' : 'bg-white border-2 border-dashed border-indigo-300 text-indigo-500'}"><span class="material-icons-round text-[13px]">add</span> โซนใหม่</button>
-                        ${canAdd ? `<button onclick="toggleLocationAddMode()" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold bg-emerald-500 text-white flex items-center gap-1 transition-all"><span class="material-icons-round text-[13px]">inventory_2</span> เพิ่มสินค้า</button>` : ''}
-                    </div>
-                    ${state.locationNewZoneMode ? `
-                    <div class="bg-indigo-50 border-b border-indigo-200 px-3 py-3 flex gap-2 items-center">
-                        <input type="text" value="${state.locationNewZoneInput}" placeholder="ชื่อโซน เช่น 1B, A2..."
-                            oninput="state.locationNewZoneInput=this.value"
-                            onkeydown="if(event.key==='Enter') confirmNewZone()"
-                            autofocus
-                            class="flex-1 p-2.5 bg-white border border-indigo-300 rounded-xl text-sm font-bold focus:border-indigo-500 transition-all uppercase">
-                        <button onclick="confirmNewZone()" class="flex-shrink-0 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-all">เลือก</button>
-                        <button onclick="state.locationNewZoneMode=false; render()" class="flex-shrink-0 px-3 py-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl text-sm active:scale-95 transition-all">ยกเลิก</button>
-                    </div>` : ''}
-                    ` : ''}
-
-                    <!-- Add panel -->
-                    ${addMode && canAdd ? `
-                    <div class="bg-indigo-50 border-b-2 border-indigo-200 p-4">
-                        <p class="text-[12px] font-bold text-indigo-700 mb-2">➕ เพิ่มสินค้าเข้า ชั้น ${floorF} › โซน ${zoneF}</p>
-                        <input type="text" value="${state.locationAddSearch}" placeholder="🔍 ค้นหาสินค้าที่ยังไม่มีโลเคชั่น..."
-                            oninput="state.locationAddSearch=this.value; render()"
-                            class="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-sm focus:border-indigo-500 transition-all mb-2">
-                        <div class="max-h-52 overflow-y-auto space-y-1">
-                            ${addable.length === 0
-                                ? `<p class="text-center text-[12px] text-slate-400 py-4">ไม่พบสินค้าที่ไม่มีโลเคชั่น</p>`
-                                : addable.slice(0, 40).map(p => `
-                                    <div onclick="addProductToCurrentZone(decodeURIComponent('${encodeURIComponent(p.name)}'))"
-                                        class="bg-white rounded-xl px-3 py-2.5 flex items-center justify-between border border-slate-100 active:bg-indigo-50 cursor-pointer transition-colors">
-                                        <span class="text-sm font-medium text-brand-blue truncate pr-2">${p.name}</span>
-                                        <span class="flex-shrink-0 text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                                            <span class="material-icons-round text-[11px]">add</span>เพิ่ม
-                                        </span>
-                                    </div>`).join('')
-                            }
-                        </div>
                     </div>` : ''}
 
-                    <!-- Search -->
+                    ${floorF === 'NOSTK' ? `
+                    <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+                        <p class="text-[11px] text-slate-500">สินค้ากลุ่มนี้ไม่เก็บสต๊อกหน้าร้าน ไม่ถูกนับในระบบสำรวจ</p>
+                    </div>` : ''}
+
                     <div class="p-3 bg-white border-b border-slate-100">
                         <input type="text" value="${state.locationSearch}" placeholder="🔍 ค้นหาชื่อสินค้า..."
                             oninput="updateLocationSearch(this.value)"
                             class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:border-brand-blue focus:bg-white transition-all">
                     </div>
 
-                    <!-- NOSTK context note -->
-                    ${floorF === 'NOSTK' ? `
-                    <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-100">
-                        <p class="text-[11px] text-slate-500">สินค้ากลุ่มนี้ไม่เก็บสต๊อกหน้าร้าน (ของแช่ฟรีซ, คลังนอก) ไม่ถูกนับในระบบสำรวจ</p>
-                    </div>` : ''}
-
-                    <main id="location-list" class="flex-1 overflow-y-auto p-4 ${editCount > 0 ? 'pb-36' : 'pb-6'}">
+                    <main id="location-list" class="flex-1 overflow-y-auto p-4 pb-8">
                         ${search ? `<p class="text-[11px] text-slate-400 font-medium mb-3 px-1">ผลการค้นหา <span class="font-bold text-brand-blue">${displayList.length} รายการ</span></p>` : ''}
                         ${displayList.length === 0
                             ? `<div class="flex flex-col items-center justify-center py-16 text-slate-400">
                                 <span class="material-icons-round text-[40px] mb-2">check_circle_outline</span>
                                 <p class="text-sm font-medium text-center px-4">${emptyMsg}</p>
                                </div>`
-                            : displayList.map(renderLocationRow).join('') + showAllBtn}
+                            : displayList.map(renderLocationRow).join('')}
                     </main>
 
-                    ${editCount > 0 ? `
-                        <div id="location-save-bar" class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-100 p-4 shadow-2xl">
-                            <p class="text-[11px] text-center text-slate-400 mb-2">✏️ แก้ไขแล้ว ${editCount} รายการ รอ Save</p>
-                            <button onclick="handleLocationSave()" class="w-full bg-brand-blue text-white font-bold py-4 rounded-2xl shadow-lg shadow-brand-blue/20 active:scale-[0.98] transition-all">
-                                💾 บันทึกทั้งหมด (${editCount} รายการ)
-                            </button>
-                        </div>` : ''}
+                    ${renderLocationSheet()}
                 </div>`;
         }
 
