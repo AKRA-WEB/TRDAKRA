@@ -97,11 +97,6 @@ function doPost(e) {
   try {
     var body = JSON.parse(e.postData.contents);
 
-    if (body.action === 'notifyLine') {
-      sendLineDispatchNotification(body.itemName, body.reqDate || body.reqId, body.requestQty, body.dispatchQty, body.dispatchedBy, body.timeStr);
-      return ContentService.createTextOutput(JSON.stringify({ status: 'success' })).setMimeType(ContentService.MimeType.JSON);
-    }
-
     // ── ใหม่: บันทึก Floor/Location/ParLevel กลับ Product Sheet ──
     if (body.action === 'updateProductDetails') {
       var ok = updateProductDetails(body.name, body.floor, body.location, body.parLevel);
@@ -350,6 +345,92 @@ function updateInventoryData(items) {
     }
     return true;
   } catch (error) { return false; }
+}
+
+// ===============================================
+// 9a. สรุปการจัดส่งสินค้าประจำวัน (Dispatch) → LINE
+//     ตั้ง Time-based trigger ให้รันทุกวัน 17:00–18:00 Bangkok
+//     (= 10:00–11:00 UTC เนื่องจาก Bangkok = UTC+7)
+// ===============================================
+function sendDailyDispatchSummary() {
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sheet = ss.getSheetByName(SHEET_NAME);
+    if (!sheet || sheet.getLastRow() < 2) {
+      Logger.log("sendDailyDispatchSummary: no data rows");
+      return;
+    }
+
+    var now     = new Date();
+    var todayDD = Utilities.formatDate(now, "Asia/Bangkok", "dd");
+    var todayMM = Utilities.formatDate(now, "Asia/Bangkok", "MM");
+    var prefix  = todayDD + "-" + todayMM;
+
+    // Columns (0-based): id(0), timestamp(1), itemName(2), requestQty(3),
+    //   status(4), oldExpiry(5), newExpiry(6), receiveQty(7), receiveNote(8),
+    //   w2Note(9), storageCapacity(10), dispatchTimestamp(11), requestedBy(12)
+    var lastRow = sheet.getLastRow();
+    var numCols = Math.min(sheet.getLastColumn(), 13);
+    var data    = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
+
+    var dispatched = [], outstock = [], pending = [];
+
+    for (var i = 0; i < data.length; i++) {
+      var ts       = data[i][1] ? data[i][1].toString() : '';
+      var itemName = data[i][2] ? data[i][2].toString().trim() : '';
+      var reqQty   = data[i][3] ? data[i][3].toString() : '';
+      var status   = data[i][4] ? data[i][4].toString().trim() : '';
+
+      if (!itemName || !ts.startsWith(prefix)) continue;
+
+      if (status === 'จัดส่งแล้ว') {
+        dispatched.push({ name: itemName, qty: reqQty });
+      } else if (status === 'สินค้าหมด') {
+        outstock.push({ name: itemName, qty: reqQty });
+      } else if (status === 'สั่งเบิก' || status === 'กำลังจัดสินค้า') {
+        pending.push({ name: itemName, qty: reqQty });
+      }
+    }
+
+    var dateStr = Utilities.formatDate(now, "Asia/Bangkok", "dd MMM yyyy");
+    var msg  = "📦 สรุปการจัดสินค้าประจำวัน\n";
+    msg     += "วันที่ " + dateStr + " · สรุป ณ 18:00 น.\n\n";
+    msg     += "✅ จัดส่งสำเร็จ " + dispatched.length + " รายการ\n";
+    msg     += "❌ สินค้าหมด "    + outstock.length   + " รายการ\n";
+    msg     += "⏳ รอจัดส่ง "     + pending.length    + " รายการ";
+
+    if (dispatched.length > 0) {
+      msg += "\n\n─────────────────\n✅ เบิกสำเร็จวันนี้\n";
+      var limit = Math.min(dispatched.length, 20);
+      for (var d = 0; d < limit; d++) {
+        msg += "• " + dispatched[d].name + " — " + dispatched[d].qty + "\n";
+      }
+      if (dispatched.length > 20) msg += "... และอีก " + (dispatched.length - 20) + " รายการ\n";
+    }
+
+    if (outstock.length > 0) {
+      msg += "\n─────────────────\n❌ สินค้าหมด (รอสต๊อกเข้า)\n";
+      for (var o = 0; o < outstock.length; o++) {
+        msg += "• " + outstock[o].name + " — " + outstock[o].qty + "\n";
+      }
+    }
+
+    msg += "\n🤖 ส่งอัตโนมัติทุกวัน 18:00 น.";
+
+    var url     = "https://api.line.me/v2/bot/message/push";
+    var payload = { "to": LINE_GROUP_ID, "messages": [{ "type": "text", "text": msg }] };
+    var options = {
+      "method": "post",
+      "contentType": "application/json",
+      "headers": { "Authorization": "Bearer " + LINE_CHANNEL_TOKEN },
+      "payload": JSON.stringify(payload),
+      "muteHttpExceptions": true
+    };
+    var resp = UrlFetchApp.fetch(url, options);
+    Logger.log("sendDailyDispatchSummary LINE response: " + resp.getResponseCode());
+  } catch (err) {
+    Logger.log("sendDailyDispatchSummary error: " + err.toString());
+  }
 }
 
 // ===============================================
