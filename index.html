@@ -1883,9 +1883,15 @@
                     <div class="w-8 h-8 flex-shrink-0 flex items-center justify-center text-sm font-bold rounded-lg ${boxClass}">${boxContent}</div>
                     <div class="flex-1 min-w-0">
                         <p class="text-sm leading-snug truncate ${nameClass}">${item.itemName}</p>
-                        <p class="text-[10px] text-slate-400 mt-0.5">
-                            ${item.requestQty} ${unit}${item.requestedBy ? ` · ${item.requestedBy}` : ''}${subExtra}
+                        <p class="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1 flex-wrap">
+                            ${item.requestedBy ? `<span class="font-medium text-slate-500">${item.requestedBy}</span><span>·</span>` : ''}
+                            <span class="font-medium text-slate-400">${item.timestamp || ''}</span>
+                            ${subExtra}
                         </p>
+                    </div>
+                    <div class="flex-shrink-0 text-right">
+                        <p class="text-base font-black ${st === 'dispatch' ? 'text-emerald-600' : st === 'outstock' ? 'text-rose-400 line-through' : 'text-brand-blue'}">${item.requestQty}</p>
+                        <p class="text-[9px] font-semibold text-slate-400 uppercase">${unit}</p>
                     </div>
                 </div>`;
         }
