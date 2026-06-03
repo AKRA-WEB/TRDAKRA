@@ -188,8 +188,8 @@
             view: 'home',
             w1Tab: 'request',
             w2Tab: 'tasks',
+            w2BatchEdits: {},
             dashboardFilter: 'week',
-            selectedReceiveId: null,
             items: [],
             products: [],
             w1Rows: [{ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' }],
@@ -570,7 +570,7 @@
         // ==========================================
         function setView(viewName) {
             state.view = viewName;
-            state.selectedReceiveId = null;
+            state.w2BatchEdits = {};
             if (viewName === 'w1') {
                 state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' }];
             }
@@ -590,8 +590,25 @@
             }
             render();
         }
-        function setW1Tab(tabName) { state.w1Tab = tabName; state.selectedReceiveId = null; render(); }
-        function setW2Tab(tabName) { state.w2Tab = tabName; state.selectedReceiveId = null; render(); }
+        function setW1Tab(tabName) { state.w1Tab = tabName; render(); }
+        function setW2Tab(tabName) { state.w2Tab = tabName; state.w2BatchEdits = {}; render(); }
+
+        function getEffectiveState(item) {
+            const edit = state.w2BatchEdits[item.id];
+            if (edit === 'dispatch') return 'dispatch';
+            if (edit === 'outstock') return 'outstock';
+            return item.status === 'สินค้าหมด' ? 'outstock' : 'pending';
+        }
+
+        function toggleW2BatchItem(id) {
+            const item = state.items.find(i => i.id === id);
+            if (!item) return;
+            const cur = getEffectiveState(item);
+            if (cur === 'pending')       state.w2BatchEdits[id] = 'dispatch';
+            else if (cur === 'dispatch') state.w2BatchEdits[id] = 'outstock';
+            else                         delete state.w2BatchEdits[id];
+            render();
+        }
         function setDashboardFilter(val) {
             state.dashboardFilter = val;
             state.calendarWeekOffset = 0;
@@ -759,68 +776,15 @@
             sendAppLog("สั่งเบิกสินค้า Bulk (TRD)", `เบิกรวม ${newItems.length} รายการ`);
         }
 
-        function openReceiveForm(id) { state.selectedReceiveId = id; render(); }
-
-        async function handleDispatchSubmit(event, id, reqQty) {
-            event.preventDefault();
-            const dispatchQty = parseInt(document.getElementById(`disp-qty-${id}`).value);
-            const newExpiryInput = document.getElementById(`disp-exp-${id}`).value;
-            const noteInput = document.getElementById(`w2-note-${id}`);
-            const w2NoteValue = noteInput ? noteInput.value : '';
-
-            const newExpiry = newExpiryInput ? convertToCE(newExpiryInput) : 'ไม่ได้ระบุ';
-
-            const targetItem = state.items.find(item => item.id === id);
-            const dispatchedItemName = targetItem ? targetItem.itemName : "";
-            const dispatchedReqQty = targetItem ? targetItem.requestQty : 0;
-            const unit = getProductUnitClient(dispatchedItemName);
-
-            let note = 'ครบ';
-            if (dispatchQty < reqQty) note = `ขาด ${reqQty - dispatchQty} ${unit}`;
-            if (dispatchQty > reqQty) note = `เกิน ${dispatchQty - reqQty} ${unit}`;
-
-            state.items = state.items.map(item => {
-                if (item.id === id) {
-                    return { 
-                        ...item, 
-                        status: 'จัดส่งแล้ว', 
-                        receiveQty: dispatchQty, 
-                        receiveNote: note, 
-                        newExpiry: newExpiry, 
-                        w2Note: w2NoteValue || item.w2Note,
-                        dispatchTimestamp: formatDateTime(new Date().toISOString())
-                    };
-                }
-                return item;
-            });
-
-            state.selectedReceiveId = null;
+        async function cancelW1Item(id) {
+            state.items = state.items.map(item =>
+                item.id === id
+                    ? { ...item, status: 'ยกเลิกรายการ', dispatchTimestamp: formatDateTime(new Date().toISOString()) }
+                    : item
+            );
             render();
             await syncDataToSheet();
-
-            sendAppLog("จัดส่งสินค้า (AKRA)", `จัดส่ง: ${dispatchedItemName} ยอด ${dispatchQty} ${unit} (${note})`);
-        }
-
-        async function updateItemStatus(id, newStatus) {
-            const noteInput = document.getElementById(`w2-note-${id}`);
-            const w2NoteValue = noteInput ? noteInput.value : '';
-            let targetItemName = "";
-
-            state.items = state.items.map(item => {
-                if (item.id === id) {
-                    targetItemName = item.itemName;
-                    return { 
-                        ...item, 
-                        status: newStatus, 
-                        w2Note: w2NoteValue || item.w2Note,
-                        dispatchTimestamp: ['สินค้าหมด', 'ยกเลิกรายการ'].includes(newStatus) ? formatDateTime(new Date().toISOString()) : (item.dispatchTimestamp || '')
-                    };
-                }
-                return item;
-            });
-            render();
-            await syncDataToSheet();
-            sendAppLog("เปลี่ยนสถานะ (AKRA)", `สถานะ: ${newStatus} (${targetItemName}) หมายเหตุ: ${w2NoteValue}`);
+            sendAppLog('ยกเลิกการเบิก (TRD)', `ID: ${id}`);
         }
 
         // ==========================================
@@ -1011,7 +975,7 @@
         }
 
         function renderHistoryList(role) {
-            const historyItems = state.items.filter(i => ['จัดส่งแล้ว', 'สินค้าหมด', 'ยกเลิกรายการ'].includes(i.status));
+            const historyItems = state.items.filter(i => ['จัดส่งแล้ว', 'ยกเลิกรายการ'].includes(i.status));
             if (historyItems.length === 0) return renderEmptyState('ไม่มีประวัติย้อนหลัง', 'history_toggle_off');
 
             return `<div class="space-y-4">
@@ -1853,7 +1817,7 @@
                                 <div class="text-right"><p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-0.5">เวลาเบิก</p><p class="text-xs text-slate-700 font-medium">${item.timestamp.split(' / ')[1] || '-'}</p><p class="text-[10px] text-slate-400">${item.timestamp.split(' / ')[0] || '-'}</p></div>
                             </div>
                             ${item.w2Note ? `<p class="text-xs mb-4 text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-100 flex items-start gap-2"><span class="material-icons-round text-[16px] mt-px">info</span> <span>${item.w2Note}</span></p>` : ''}
-                            ${item.status === 'สั่งเบิก' ? `<div class="flex justify-end"><button onclick="if(confirm('ต้องการยกเลิกรายการเบิกนี้ใช่หรือไม่?')) updateItemStatus('${item.id}', 'ยกเลิกรายการ')" class="text-[11px] font-semibold tracking-wide text-brand-orange hover:bg-brand-orange/10 px-3 py-1.5 rounded-full flex items-center gap-1 transition-colors">ยกเลิกการเบิก</button></div>` : ''}
+                            ${item.status === 'สั่งเบิก' ? `<div class="flex justify-end"><button onclick="if(confirm('ต้องการยกเลิกรายการเบิกนี้ใช่หรือไม่?')) cancelW1Item('${item.id}')" class="text-[11px] font-semibold tracking-wide text-brand-orange hover:bg-brand-orange/10 px-3 py-1.5 rounded-full flex items-center gap-1 transition-colors">ยกเลิกการเบิก</button></div>` : ''}
                         </div>
                     `).join('') + `</div>`;
                 }
@@ -1880,66 +1844,107 @@
                 </div>`;
         }
 
+        function renderW2BatchRow(item) {
+            const st    = getEffectiveState(item);
+            const unit  = getProductUnitClient(item.itemName);
+            const enc   = encodeURIComponent(item.id);
+
+            let boxClass, boxContent, rowBg, nameClass, subExtra = '';
+            if (st === 'dispatch') {
+                boxClass   = 'bg-emerald-500 text-white';
+                boxContent = '✓';
+                rowBg      = 'bg-emerald-50 border-emerald-100';
+                nameClass  = 'font-bold text-emerald-800';
+            } else if (st === 'outstock') {
+                boxClass   = 'bg-rose-100 text-rose-500';
+                boxContent = '✕';
+                rowBg      = 'bg-rose-50 border-rose-100';
+                nameClass  = 'font-semibold text-rose-400 line-through';
+                if (item.dispatchTimestamp && item.dispatchTimestamp !== '-') {
+                    subExtra = ` <span class="text-rose-300">· หมด ${item.dispatchTimestamp}</span>`;
+                }
+            } else {
+                boxClass   = 'border-2 border-slate-200 bg-white';
+                boxContent = '';
+                rowBg      = 'bg-white border-slate-100';
+                nameClass  = 'font-semibold text-brand-blue';
+            }
+
+            return `
+                <div onclick="toggleW2BatchItem(decodeURIComponent('${enc}'))"
+                     class="flex items-center gap-3 p-3.5 rounded-2xl border shadow-sm cursor-pointer active:scale-[0.99] transition-all ${rowBg}">
+                    <div class="w-8 h-8 flex-shrink-0 flex items-center justify-center text-sm font-bold rounded-lg ${boxClass}">${boxContent}</div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm leading-snug truncate ${nameClass}">${item.itemName}</p>
+                        <p class="text-[10px] text-slate-400 mt-0.5">
+                            ${item.requestQty} ${unit}${item.requestedBy ? ` · ${item.requestedBy}` : ''}${subExtra}
+                        </p>
+                    </div>
+                </div>`;
+        }
+
+        async function confirmBatchDispatch() {
+            const toDispatch = Object.entries(state.w2BatchEdits).filter(([, v]) => v === 'dispatch');
+            if (toDispatch.length === 0) { alert('เลือกสินค้าที่จะจัดส่งก่อน'); return; }
+
+            const now = formatDateTime(new Date().toISOString());
+
+            state.items = state.items.map(item => {
+                const edit = state.w2BatchEdits[item.id];
+                if (edit === 'dispatch') {
+                    return { ...item, status: 'จัดส่งแล้ว', receiveQty: item.requestQty, receiveNote: 'ครบ', dispatchTimestamp: now };
+                }
+                if (edit === 'outstock') {
+                    return { ...item, status: 'สินค้าหมด', dispatchTimestamp: now };
+                }
+                return item;
+            });
+
+            state.w2BatchEdits = {};
+            render();
+            await syncDataToSheet();
+            sendAppLog('จัดส่งสินค้า Batch (AKRA)', `จัดส่ง ${toDispatch.length} รายการ`);
+        }
+
         function renderW2() {
-            const hasTasks = state.items.some(i => ['สั่งเบิก', 'กำลังจัดสินค้า'].includes(i.status));
+            const ACTIVE_STATUSES = ['สั่งเบิก', 'กำลังจัดสินค้า', 'สินค้าหมด'];
+            const hasTasks = state.items.some(i => ACTIVE_STATUSES.includes(i.status));
             let content = '';
             if (state.w2Tab === 'tasks') {
-                const activeTasks = state.items.filter(i => ['สั่งเบิก', 'กำลังจัดสินค้า'].includes(i.status));
+                const activeTasks = state.items.filter(i => ACTIVE_STATUSES.includes(i.status));
                 if (activeTasks.length === 0) {
                     content = renderEmptyState('ไม่มีงานจัดสินค้า', 'inventory_2');
                 } else {
-                    content = `<div class="space-y-4 animate-fade-in">` + activeTasks.map(item => `
-                        <div class="bg-white p-5 rounded-[1.5rem] shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-slate-100 border-l-[4px] border-l-brand-blue">
-                            <div class="flex justify-between items-start mb-4">
-                                <div class="pr-2">
-                                    <h3 class="font-bold text-brand-blue text-[16px] leading-snug">${item.itemName}</h3>
-                                    <div class="flex items-center gap-1.5 text-[10px] text-slate-400 mt-1 font-medium flex-wrap">
-                                        <span class="font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[9px] font-semibold">ID: ${item.id}</span>
-                                        <span class="inline-flex items-center gap-0.5 text-slate-500">
-                                            <span class="material-icons-round text-[12px] text-slate-400">schedule</span>
-                                            เบิก: ${item.timestamp}
-                                        </span>
-                                        ${item.requestedBy ? `
-                                            <span class="inline-flex items-center gap-0.5 text-brand-blue bg-brand-blue/5 border border-brand-blue/10 px-1.5 py-0.5 rounded-[4px] text-[9px] font-semibold">
-                                                <span class="material-icons-round text-[11px] text-brand-blue/70">account_circle</span>
-                                                ${item.requestedBy}
-                                            </span>
-                                        ` : ''}
-                                    </div>
+                    const dispatchCount = activeTasks.filter(i => getEffectiveState(i) === 'dispatch').length;
+                    const outstockCount = activeTasks.filter(i => getEffectiveState(i) === 'outstock').length;
+                    const pendingCount  = activeTasks.filter(i => getEffectiveState(i) === 'pending').length;
+                    content = `
+                        <div class="animate-fade-in">
+                            <div class="grid grid-cols-3 border border-slate-100 rounded-2xl overflow-hidden mb-4 bg-white shadow-sm">
+                                <div class="p-3 text-center ${dispatchCount > 0 ? 'bg-emerald-50' : ''}">
+                                    <p class="text-xl font-black ${dispatchCount > 0 ? 'text-emerald-600' : 'text-slate-300'}">${dispatchCount}</p>
+                                    <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">เลือกจัด</p>
                                 </div>
-                                <div class="flex-shrink-0">${getStatusBadge(item.status)}</div>
-                            </div>
-                            <div class="bg-brand-blue/5 rounded-2xl p-4 mb-4 flex justify-between items-center border border-brand-blue/10">
-                                <div><p class="text-[10px] font-semibold text-brand-blue uppercase tracking-wider mb-0.5">ยอดสั่งเบิก / ความจุ</p><p class="font-bold text-brand-blue text-lg">${item.requestQty} <span class="text-xs font-medium text-brand-blue/70">${getProductUnitClient(item.itemName)}</span> / ${item.storageCapacity || 0} <span class="text-xs font-medium text-brand-blue/70">สต๊อคจัดเก็บได้</span></p></div>
-                                <div class="text-right"><p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-0.5">หมดอายุเก่า</p><p class="text-xs text-slate-700 font-medium">${item.oldExpiry}</p></div>
-                            </div>
-                            <div class="mb-5">
-                                <label class="block text-[11px] font-semibold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">โน้ตแจ้งหน้าร้าน <span class="text-[10px] font-normal normal-case text-slate-400">(ถ้ามี)</span></label>
-                                <input type="text" id="w2-note-${item.id}" value="${item.w2Note || ''}" class="w-full p-3.5 bg-slate-50 border border-transparent rounded-xl focus:bg-white focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10 transition-all text-sm text-slate-800 placeholder:text-slate-300" placeholder="เช่น ของได้แค่ 5 ชิ้น...">
-                            </div>
-                            ${state.selectedReceiveId !== item.id ? `
-                                <div class="flex flex-col gap-2">
-                                    <button onclick="openReceiveForm('${item.id}')" class="w-full py-4 bg-brand-orange text-white font-medium rounded-xl shadow-[0_4px_12px_rgba(227,82,5,0.2)] flex justify-center items-center gap-2 text-sm active:scale-[0.98] transition-all hover:bg-[#c94804]">จัดส่งสินค้า <span class="material-icons-round text-[18px]">local_shipping</span></button>
-                                    <div class="flex gap-2 mt-1">
-                                        <button onclick="if(confirm('ยืนยันแจ้งสินค้าหมด?')) updateItemStatus('${item.id}', 'สินค้าหมด')" class="flex-1 py-2 text-[11px] font-semibold tracking-wide text-rose-500 hover:bg-rose-50 rounded-lg transition-colors">แจ้งของหมด</button>
-                                        <button onclick="if(confirm('ต้องการยกเลิกรายการนี้?')) updateItemStatus('${item.id}', 'ยกเลิกรายการ')" class="flex-1 py-2 text-[11px] font-semibold tracking-wide text-slate-400 hover:bg-slate-100 rounded-lg transition-colors">ยกเลิกรายการ</button>
-                                    </div>
+                                <div class="p-3 text-center border-x border-slate-100 ${outstockCount > 0 ? 'bg-rose-50' : ''}">
+                                    <p class="text-xl font-black ${outstockCount > 0 ? 'text-rose-500' : 'text-slate-300'}">${outstockCount}</p>
+                                    <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">สินค้าหมด</p>
                                 </div>
-                            ` : `
-                                <form onsubmit="handleDispatchSubmit(event, '${item.id}', ${item.requestQty})" class="mt-4 pt-4 border-t border-slate-100 animate-fade-in">
-                                    <h4 class="font-bold text-brand-orange text-sm mb-4 flex items-center justify-center gap-2"><span class="material-icons-round text-[18px]">inventory</span> ฟอร์มยืนยันการจัดส่ง</h4>
-                                    <div class="space-y-4">
-                                        <div><label class="block text-[11px] font-semibold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">ยอดจัดส่งจริง (${getProductUnitClient(item.itemName)})</label><input type="number" id="disp-qty-${item.id}" required min="0" value="${item.requestQty}" class="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-brand-orange focus:ring-1 focus:ring-brand-orange text-center text-lg font-bold text-brand-orange transition-all"></div>
-                                        <div><label class="block text-[11px] font-semibold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">วันหมดอายุใหม่</label><input type="text" id="disp-exp-${item.id}" class="w-full p-3.5 bg-slate-50 border border-transparent rounded-xl focus:bg-white focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10 text-sm transition-all" placeholder="วว-ดด-ปป (ถ้ามี)"></div>
-                                        <div class="flex gap-3 pt-2">
-                                            <button type="button" onclick="openReceiveForm(null)" class="flex-1 bg-white border border-slate-200 text-slate-500 py-3.5 rounded-xl font-medium text-sm transition-colors hover:bg-slate-50">ยกเลิก</button>
-                                            <button type="submit" class="flex-[2] bg-brand-orange text-white py-3.5 rounded-xl font-medium text-sm shadow-[0_4px_12px_rgba(227,82,5,0.2)] active:scale-[0.98] transition-all hover:bg-[#c94804]">ยืนยันการส่ง</button>
-                                        </div>
-                                    </div>
-                                </form>
-                            `}
+                                <div class="p-3 text-center">
+                                    <p class="text-xl font-black ${pendingCount > 0 ? 'text-brand-blue' : 'text-slate-300'}">${pendingCount}</p>
+                                    <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">รอจัด</p>
+                                </div>
+                            </div>
+                            <div class="space-y-2">${activeTasks.map(renderW2BatchRow).join('')}</div>
+                            <div class="h-24"></div>
                         </div>
-                    `).join('') + `</div>`;
+                        <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-100 p-4 shadow-2xl z-10">
+                            <p class="text-[10px] text-center text-slate-400 mb-2">✓ จัดส่ง ${dispatchCount} · ✕ หมด ${outstockCount} · รอ ${pendingCount}</p>
+                            <button onclick="confirmBatchDispatch()"
+                                    class="w-full py-4 rounded-2xl font-bold text-sm transition-all active:scale-[0.98]
+                                           ${dispatchCount > 0 ? 'bg-brand-blue text-white shadow-lg shadow-brand-blue/20' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}">
+                                🚚 ยืนยันจัดส่ง ${dispatchCount} รายการ
+                            </button>
+                        </div>`;
                 }
             } else if (state.w2Tab === 'history') { content = renderHistoryList('w2'); }
 
