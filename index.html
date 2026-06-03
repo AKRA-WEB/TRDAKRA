@@ -37,6 +37,11 @@
             from { opacity: 0; transform: translateY(8px); }
             to { opacity: 1; transform: translateY(0); }
         }
+        .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        @keyframes slideUp {
+            from { transform: translate(-50%, 100%); opacity: 0; }
+            to { transform: translate(-50%, 0); opacity: 1; }
+        }
         /* Hide scrollbar for cleaner look */
         ::-webkit-scrollbar { width: 0px; background: transparent; }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; background: transparent; }
@@ -74,7 +79,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260602.04";
+        const CURRENT_VERSION = "20260603.01";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -201,6 +206,16 @@
             locationSheetFloor: '',
             locationSheetZoneInput: '',
             locationSheetParLevel: '',
+            locationBulkMode: false,
+            locationSelectedItems: {}, // { productName: true }
+            locationLimit: 40,
+            tempZones: [],
+            locationAddProductsToZoneSheet: false,
+            zonePopupSelectedItems: {},
+            zonePopupSearch: '',
+            zonePopupLimit: 40,
+            showAddZoneModal: false,
+            newZoneNameInput: '',
             // Check Stock State
             checkStockLocation: null,
             checkStockEdits: {}, // { productName: { checked: true, currentStock: '', requestQty: '' } }
@@ -351,6 +366,47 @@
             } catch (err) { console.error('pushProductDetails error', err); }
         }
 
+        // ── บันทึก Floor/Location/ParLevel แบบกลุ่ม กลับ Google Sheet ──
+        async function pushProductDetailsBatch(names, floor, location, parLevel) {
+            if (!names || names.length === 0 || (!floor && !location && !parLevel)) return;
+            
+            // ลองรันแบบ Batch API เพื่อความรวดเร็ว
+            try {
+                const res = await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify({ 
+                        action: 'updateProductDetailsBatch', 
+                        names: names, 
+                        floor, 
+                        location, 
+                        parLevel: parseInt(parLevel) || 0 
+                    })
+                });
+                const resJson = await res.json();
+                if (resJson && resJson.status === 'success') {
+                    // อัปเดตข้อมูลภายในเครื่องทันที
+                    names.forEach(name => {
+                        const idx = state.products.findIndex(p => (p.name || '').trim() === name.trim());
+                        if (idx !== -1) {
+                            if (floor)    state.products[idx].floor    = floor;
+                            if (location !== undefined) state.products[idx].location = location;
+                            if (parLevel) state.products[idx].parLevel = parseInt(parLevel) || 0;
+                        }
+                    });
+                    return;
+                }
+            } catch (err) {
+                console.warn('Batch API failed or not deployed yet, falling back to sequential updates...', err);
+            }
+            
+            // กรณีไม่มี API ใหม่บนเซิร์ฟเวอร์ ให้ยิงแบบเรียงลำดับทีละตัว (Sequential Fallback)
+            console.log('Running sequential fallback updates for names:', names);
+            for (const name of names) {
+                await pushProductDetails(name, floor, location, parLevel);
+            }
+        }
+
         // ── Logic คำนวณสถานะสต๊อก ──
         function getStockStatus(currentStock, parLevel) {
             const cur = parseInt(currentStock) || 0;
@@ -369,23 +425,171 @@
         }
 
         function setLocationFloor(floor) {
-            state.locationFloorFilter = state.locationFloorFilter === floor ? '' : floor;
+            state.locationFloorFilter = floor;
             state.locationZoneFilter = '';
-            state.locationSearch = '';
+            state.locationLimit = 40; // รีเซ็ตการแสดงผล
             render();
         }
 
         function setLocationZone(zone) {
             state.locationZoneFilter = state.locationZoneFilter === zone ? '' : zone;
+            state.locationLimit = 40; // รีเซ็ตการแสดงผล
             render();
         }
 
+        function setLocationTab(tab) {
+            if (tab === 'missing') {
+                state.locationFloorFilter = '';
+            } else {
+                if (state.locationFloorFilter === '' || state.locationFloorFilter === 'NOSTK') {
+                    state.locationFloorFilter = '1';
+                }
+            }
+            state.locationZoneFilter = '';
+            state.locationLimit = 40; // รีเซ็ตการแสดงผล
+            render();
+        }
+
+        function toggleBulkMode() {
+            state.locationBulkMode = !state.locationBulkMode;
+            if (!state.locationBulkMode) {
+                state.locationSelectedItems = {}; // เคลียร์รายการที่เลือกเมื่อออกจากโหมดกลุ่ม
+            }
+            state.locationLimit = 40;
+            render();
+        }
+
+        function toggleBulkItemSelect(productName) {
+            const enc = encodeURIComponent(productName);
+            const rowEl = document.getElementById(`bulk-row-${enc}`);
+            const checkEl = document.getElementById(`bulk-check-${enc}`);
+            
+            const isSelected = !state.locationSelectedItems[productName];
+            if (isSelected) {
+                state.locationSelectedItems[productName] = true;
+            } else {
+                delete state.locationSelectedItems[productName];
+            }
+            
+            // อัปเดตเฉพาะ DOM แถวนั้นเพื่อหลีกเลี่ยงการวาดใหม่ทังหมด (กระตุก)
+            if (rowEl && checkEl) {
+                if (isSelected) {
+                    rowEl.classList.remove('bg-white', 'border-slate-100', 'border-rose-200');
+                    rowEl.classList.add('bg-indigo-50/55', 'border-indigo-200');
+                    checkEl.innerText = 'check_box';
+                    checkEl.classList.remove('text-slate-300');
+                    checkEl.classList.add('text-indigo-600');
+                } else {
+                    rowEl.classList.remove('bg-indigo-50/55', 'border-indigo-200');
+                    rowEl.classList.add('bg-white');
+                    const isMissing = !state.products.find(p => p.name === productName)?.floor;
+                    rowEl.classList.add(isMissing ? 'border-rose-200' : 'border-slate-100');
+                    checkEl.innerText = 'check_box_outline_blank';
+                    checkEl.classList.remove('text-indigo-600');
+                    checkEl.classList.add('text-slate-300');
+                }
+            }
+            
+            updateBulkActionBar();
+        }
+
+        function toggleVisibleBulkSelect(el) {
+            const floorF = state.locationFloorFilter;
+            const zoneF  = state.locationZoneFilter;
+            const search = (state.locationSearch || '').toLowerCase().trim();
+
+            let displayList = [];
+            if (floorF === '') {
+                displayList = state.products.filter(p => !p.floor);
+            } else {
+                if (floorF === 'NOSTK') {
+                    displayList = state.products.filter(p => p.floor === 'NOSTK');
+                } else if (floorF && zoneF) {
+                    displayList = state.products.filter(p => p.floor === floorF && extractZone(p.location) === zoneF);
+                } else if (floorF) {
+                    displayList = state.products.filter(p => p.floor === floorF);
+                }
+            }
+
+            if (search) {
+                displayList = displayList.filter(p => (p.name || '').toLowerCase().includes(search));
+            }
+
+            const visibleItems = displayList.slice(0, state.locationLimit);
+            const allSelected = visibleItems.every(p => !!state.locationSelectedItems[p.name]);
+
+            visibleItems.forEach(p => {
+                if (!allSelected) {
+                    state.locationSelectedItems[p.name] = true;
+                } else {
+                    delete state.locationSelectedItems[p.name];
+                }
+            });
+
+            // อัปเดตรายการเฉพาะในกลุ่ม
+            const listEl = document.getElementById('location-list');
+            if (listEl) {
+                listEl.innerHTML = renderLocationListHTML();
+            }
+            updateBulkActionBar();
+        }
+
+        function updateBulkActionBar() {
+            const selectedCount = Object.keys(state.locationSelectedItems).length;
+            const barEl = document.getElementById('bulk-action-bar');
+            if (!barEl) return;
+            
+            if (state.locationBulkMode && selectedCount > 0) {
+                barEl.innerHTML = `
+                    <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-200 px-4 py-3 shadow-lg z-30 flex items-center justify-between animate-slide-up">
+                        <div class="flex items-center gap-2">
+                            <span class="material-icons-round text-indigo-600">library_add_check</span>
+                            <span class="text-xs font-bold text-slate-700">เลือกแล้ว <span class="text-indigo-600 text-sm font-black">${selectedCount}</span> รายการ</span>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="clearBulkSelection()" class="px-3 py-2 bg-slate-100 text-slate-500 rounded-xl text-xs font-bold active:scale-95 transition-all">
+                                ยกเลิก
+                            </button>
+                            <button onclick="openLocationSheet('BULK_MODE')" class="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold shadow shadow-indigo-200 active:scale-95 transition-all">
+                                📍 จัดโลเคชั่นกลุ่ม
+                            </button>
+                        </div>
+                    </div>`;
+            } else {
+                barEl.innerHTML = '';
+            }
+        }
+
+        function clearBulkSelection() {
+            state.locationSelectedItems = {};
+            const listEl = document.getElementById('location-list');
+            if (listEl) {
+                listEl.innerHTML = renderLocationListHTML();
+            }
+            updateBulkActionBar();
+        }
+
+        function loadMoreLocationItems() {
+            state.locationLimit += 40;
+            const listEl = document.getElementById('location-list');
+            if (listEl) {
+                listEl.innerHTML = renderLocationListHTML();
+            }
+        }
+
         function openLocationSheet(productName) {
-            const prod = state.products.find(p => p.name === productName) || {};
-            state.locationSheet = { name: productName };
-            state.locationSheetFloor = prod.floor || '';
-            state.locationSheetZoneInput = prod.location || '';
-            state.locationSheetParLevel = prod.parLevel ? String(prod.parLevel) : '';
+            if (productName === 'BULK_MODE') {
+                state.locationSheet = { name: 'BULK_MODE' };
+                state.locationSheetFloor = '';
+                state.locationSheetZoneInput = '';
+                state.locationSheetParLevel = '';
+            } else {
+                const prod = state.products.find(p => p.name === productName) || {};
+                state.locationSheet = { name: productName };
+                state.locationSheetFloor = prod.floor || '';
+                state.locationSheetZoneInput = prod.location || '';
+                state.locationSheetParLevel = prod.parLevel ? String(prod.parLevel) : '';
+            }
             render();
         }
 
@@ -414,9 +618,20 @@
 
             showLoading('กำลังบันทึกโลเคชั่น...');
             try {
-                await pushProductDetails(name, floor, floor === 'NOSTK' ? '' : zone, parLevel);
-                localStorage.removeItem('TRDAKRA_DATA');
-                sendAppLog('จัดโลเคชั่นสินค้า', `${name} → ชั้น ${floor} โซน ${zone}`);
+                if (name === 'BULK_MODE') {
+                    const selectedNames = Object.keys(state.locationSelectedItems);
+                    await pushProductDetailsBatch(selectedNames, floor, floor === 'NOSTK' ? '' : zone, parLevel);
+                    localStorage.removeItem('TRDAKRA_DATA');
+                    sendAppLog('จัดโลเคชั่นกลุ่ม (TRD)', `${selectedNames.length} รายการ → ชั้น ${floor} โซน ${zone}`);
+                    
+                    // ล้างสเตตหลังบันทึกเสร็จ
+                    state.locationSelectedItems = {};
+                    state.locationBulkMode = false;
+                } else {
+                    await pushProductDetails(name, floor, floor === 'NOSTK' ? '' : zone, parLevel);
+                    localStorage.removeItem('TRDAKRA_DATA');
+                    sendAppLog('จัดโลเคชั่นสินค้า (TRD)', `${name} → ชั้น ${floor} โซน ${zone}`);
+                }
             } catch(e) {
                 hideLoading();
                 alert('บันทึกไม่สำเร็จ กรุณาลองใหม่');
@@ -424,6 +639,359 @@
             }
             hideLoading();
             closeLocationSheet();
+        }
+
+        // ── แป้นควบคุมและป็อปอัพจัดการโซน ──
+        function openAddZoneDialog() {
+            state.showAddZoneModal = true;
+            state.newZoneNameInput = '';
+            render();
+            setTimeout(() => {
+                const inp = document.getElementById('new-zone-name-input');
+                if (inp) {
+                    inp.focus();
+                }
+            }, 100);
+        }
+
+        function closeAddZoneModal() {
+            state.showAddZoneModal = false;
+            state.newZoneNameInput = '';
+            render();
+        }
+
+        function submitAddZoneModal() {
+            const zone = state.newZoneNameInput;
+            if (!zone || !zone.trim()) {
+                alert('กรุณากรอกชื่อโซน');
+                return;
+            }
+            const formatted = zone.trim().toUpperCase();
+            if (!state.tempZones) state.tempZones = [];
+            if (!state.tempZones.includes(formatted)) {
+                state.tempZones.push(formatted);
+            }
+            state.locationZoneFilter = formatted;
+            state.locationLimit = 40;
+            state.showAddZoneModal = false;
+            state.newZoneNameInput = '';
+            render();
+        }
+
+        function openZonePopupAdd() {
+            state.locationAddProductsToZoneSheet = true;
+            state.zonePopupSelectedItems = {};
+            state.zonePopupSearch = '';
+            state.zonePopupLimit = 40;
+            render();
+        }
+
+        function closeZonePopupAdd() {
+            state.locationAddProductsToZoneSheet = false;
+            state.zonePopupSelectedItems = {};
+            state.zonePopupSearch = '';
+            state.zonePopupLimit = 40;
+            render();
+        }
+
+        function updateZonePopupSearch(val) {
+            state.zonePopupSearch = val;
+            state.zonePopupLimit = 40;
+            const listEl = document.getElementById('zone-popup-list');
+            if (listEl) {
+                const search = val.toLowerCase().trim();
+                let unassignedList = state.products.filter(p => !p.floor);
+                if (search) {
+                    unassignedList = unassignedList.filter(p => (p.name || '').toLowerCase().includes(search));
+                }
+                const totalCount = unassignedList.length;
+                const sliced = unassignedList.slice(0, state.zonePopupLimit);
+                listEl.innerHTML = renderZonePopupListHTML(sliced, totalCount);
+            }
+        }
+
+        function loadMorePopupItems() {
+            state.zonePopupLimit = (state.zonePopupLimit || 40) + 40;
+            const listEl = document.getElementById('zone-popup-list');
+            if (listEl) {
+                const search = (state.zonePopupSearch || '').toLowerCase().trim();
+                let unassignedList = state.products.filter(p => !p.floor);
+                if (search) {
+                    unassignedList = unassignedList.filter(p => (p.name || '').toLowerCase().includes(search));
+                }
+                const totalCount = unassignedList.length;
+                const sliced = unassignedList.slice(0, state.zonePopupLimit);
+                listEl.innerHTML = renderZonePopupListHTML(sliced, totalCount);
+            }
+        }
+
+        function togglePopupItemSelect(productName) {
+            const enc = encodeURIComponent(productName);
+            const rowEl = document.getElementById(`popup-row-${enc}`);
+            const checkEl = document.getElementById(`popup-check-${enc}`);
+            
+            const isSelected = !state.zonePopupSelectedItems[productName];
+            if (isSelected) {
+                state.zonePopupSelectedItems[productName] = true;
+            } else {
+                delete state.zonePopupSelectedItems[productName];
+            }
+            
+            // อัปเดต DOM แถวนั้นโดยตรงแบบเรียลไทม์เพื่อไม่ให้สูญเสียโฟกัสของช่องค้นหา
+            if (rowEl && checkEl) {
+                if (isSelected) {
+                    rowEl.classList.remove('border-slate-100');
+                    rowEl.classList.add('bg-indigo-50/50', 'border-indigo-300', 'shadow-sm');
+                    checkEl.innerText = 'check_box';
+                    checkEl.classList.remove('text-slate-300');
+                    checkEl.classList.add('text-indigo-600', 'font-bold');
+                } else {
+                    rowEl.classList.remove('bg-indigo-50/50', 'border-indigo-300', 'shadow-sm');
+                    rowEl.classList.add('border-slate-100');
+                    checkEl.innerText = 'check_box_outline_blank';
+                    checkEl.classList.remove('text-indigo-600', 'font-bold');
+                    checkEl.classList.add('text-slate-300');
+                }
+            }
+            
+            // อัปเดตปุ่มบันทึกด้านล่างโดยตรง
+            const saveBtn = document.querySelector('#zone-popup-list + div button');
+            if (saveBtn) {
+                const selectedCount = Object.keys(state.zonePopupSelectedItems).length;
+                const zone = state.locationZoneFilter;
+                saveBtn.innerText = `✓ ย้ายเข้าโซน ${zone} (${selectedCount} รายการ)`;
+                if (selectedCount > 0) {
+                    saveBtn.classList.remove('bg-slate-100', 'text-slate-400', 'cursor-not-allowed');
+                    saveBtn.classList.add('bg-indigo-600', 'text-white', 'shadow-lg', 'shadow-indigo-200');
+                    saveBtn.onclick = confirmZonePopupAdd;
+                } else {
+                    saveBtn.classList.remove('bg-indigo-600', 'text-white', 'shadow-lg', 'shadow-indigo-200');
+                    saveBtn.classList.add('bg-slate-100', 'text-slate-400', 'cursor-not-allowed');
+                    saveBtn.onclick = null;
+                }
+            }
+        }
+
+        function toggleVisiblePopupSelect(el) {
+            const search = (state.zonePopupSearch || '').toLowerCase().trim();
+            let unassignedList = state.products.filter(p => !p.floor);
+            if (search) {
+                unassignedList = unassignedList.filter(p => (p.name || '').toLowerCase().includes(search));
+            }
+            
+            const visibleItems = unassignedList.slice(0, state.zonePopupLimit || 40);
+            const allSelected = visibleItems.every(p => !!state.zonePopupSelectedItems[p.name]);
+            
+            visibleItems.forEach(p => {
+                if (!allSelected) {
+                    state.zonePopupSelectedItems[p.name] = true;
+                } else {
+                    delete state.zonePopupSelectedItems[p.name];
+                }
+            });
+            
+            const listEl = document.getElementById('zone-popup-list');
+            if (listEl) {
+                listEl.innerHTML = renderZonePopupListHTML(visibleItems, unassignedList.length);
+            }
+            
+            // อัปเดตปุ่มบันทึก
+            const saveBtn = document.querySelector('#zone-popup-list + div button');
+            if (saveBtn) {
+                const selectedCount = Object.keys(state.zonePopupSelectedItems).length;
+                const zone = state.locationZoneFilter;
+                saveBtn.innerText = `✓ ย้ายเข้าโซน ${zone} (${selectedCount} รายการ)`;
+                if (selectedCount > 0) {
+                    saveBtn.classList.remove('bg-slate-100', 'text-slate-400', 'cursor-not-allowed');
+                    saveBtn.classList.add('bg-indigo-600', 'text-white', 'shadow-lg', 'shadow-indigo-200');
+                    saveBtn.onclick = confirmZonePopupAdd;
+                } else {
+                    saveBtn.classList.remove('bg-indigo-600', 'text-white', 'shadow-lg', 'shadow-indigo-200');
+                    saveBtn.classList.add('bg-slate-100', 'text-slate-400', 'cursor-not-allowed');
+                    saveBtn.onclick = null;
+                }
+            }
+        }
+
+        async function confirmZonePopupAdd() {
+            const floor = state.locationFloorFilter;
+            const zone = state.locationZoneFilter;
+            const selectedNames = Object.keys(state.zonePopupSelectedItems);
+            
+            if (!floor || !zone || selectedNames.length === 0) return;
+            
+            showLoading('กำลังย้ายสินค้าเข้าโซน...');
+            try {
+                await pushProductDetailsBatch(selectedNames, floor, zone, 0);
+                localStorage.removeItem('TRDAKRA_DATA');
+                sendAppLog('เพิ่มสินค้าเข้าโซน (TRD)', `${selectedNames.length} รายการ → ชั้น ${floor} โซน ${zone}`);
+                
+                // ล้างสเตตและปิดหน้าต่าง
+                state.zonePopupSelectedItems = {};
+                state.locationAddProductsToZoneSheet = false;
+                state.zonePopupSearch = '';
+                state.zonePopupLimit = 40;
+            } catch(e) {
+                hideLoading();
+                alert('บันทึกไม่สำเร็จ กรุณาลองใหม่');
+                return;
+            }
+            hideLoading();
+            render();
+        }
+
+        function renderZonePopupListHTML(sliced, totalCount) {
+            if (sliced.length === 0) {
+                return `
+                    <div class="flex flex-col items-center justify-center py-16 text-slate-400">
+                        <span class="material-icons-round text-[40px] mb-2">info</span>
+                        <p class="text-sm font-medium text-center px-4">ไม่พบสินค้าที่ไม่มีโลเคชั่น</p>
+                    </div>`;
+            }
+            
+            let html = '';
+            
+            // Checkbox "เลือกทั้งหมด"
+            const allSelected = sliced.every(p => !!state.zonePopupSelectedItems[p.name]);
+            html += `
+                <div onclick="toggleVisiblePopupSelect(this)" class="bg-indigo-50/20 p-3 rounded-2xl border border-indigo-100 shadow-sm mb-3 flex items-center gap-3 cursor-pointer hover:bg-indigo-50/40 active:scale-[0.99] transition-all">
+                    <span class="material-icons-round ${allSelected ? 'text-indigo-600 font-bold' : 'text-slate-300'} text-[24px] select-none">
+                        ${allSelected ? 'check_box' : 'check_box_outline_blank'}
+                    </span>
+                    <span class="text-xs font-bold text-indigo-900">เลือกทั้งหมดที่แสดงอยู่ (${sliced.length} รายการ)</span>
+                </div>`;
+                
+            html += sliced.map(p => {
+                const isSelected = !!state.zonePopupSelectedItems[p.name];
+                const enc = encodeURIComponent(p.name);
+                const bgClass = isSelected ? 'bg-indigo-50/50 border-indigo-300 shadow-sm' : 'bg-white border-slate-100';
+                const checkIcon = isSelected ? 'check_box' : 'check_box_outline_blank';
+                const checkColor = isSelected ? 'text-indigo-600 font-bold' : 'text-slate-300';
+                
+                return `
+                    <div onclick="togglePopupItemSelect(decodeURIComponent('${enc}'))"
+                         id="popup-row-${enc}"
+                         class="bg-white p-3.5 rounded-2xl border shadow-sm mb-2.5 flex items-center justify-between gap-3 cursor-pointer transition-all ${bgClass}">
+                        <div class="flex-1 min-w-0">
+                            <p class="font-bold text-brand-blue text-sm leading-snug truncate mb-1">${p.name}</p>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-500 border border-rose-200">🔴 ยังไม่มีโลเคชั่น</span>
+                        </div>
+                        <span id="popup-check-${enc}" class="material-icons-round ${checkColor} text-[24px] flex-shrink-0 select-none">
+                            ${checkIcon}
+                        </span>
+                    </div>`;
+            }).join('');
+            
+            if (totalCount > (state.zonePopupLimit || 40)) {
+                html += `
+                    <div class="p-3 text-center">
+                        <button onclick="loadMorePopupItems()" class="w-full py-3 bg-white border border-slate-200 text-brand-blue rounded-2xl text-xs font-bold shadow-sm active:scale-[0.98] transition-all">
+                            แสดงเพิ่มอีก 40 รายการ (เหลืออีก ${totalCount - state.zonePopupLimit} รายการ)
+                        </button>
+                    </div>`;
+            }
+            
+            return html;
+        }
+
+        function renderZonePopupAdd() {
+            if (!state.locationAddProductsToZoneSheet) return '';
+            const floor = state.locationFloorFilter;
+            const zone = state.locationZoneFilter;
+            
+            const search = (state.zonePopupSearch || '').toLowerCase().trim();
+            let unassignedList = state.products.filter(p => !p.floor);
+            
+            if (search) {
+                unassignedList = unassignedList.filter(p => (p.name || '').toLowerCase().includes(search));
+            }
+            
+            const totalCount = unassignedList.length;
+            const sliced = unassignedList.slice(0, state.zonePopupLimit || 40);
+            
+            const selectedCount = Object.keys(state.zonePopupSelectedItems || {}).length;
+            const canSave = selectedCount > 0;
+            
+            return `
+                <div onclick="closeZonePopupAdd()" class="fixed inset-0 bg-black/40 z-40"></div>
+                <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-[#f8fafc] rounded-t-[2rem] z-50 shadow-2xl flex flex-col animate-slide-up" style="height: 80vh;">
+                    <!-- Header -->
+                    <div class="flex items-center justify-between p-4 bg-white border-b border-slate-100 rounded-t-[2rem]">
+                        <div>
+                            <p class="text-[11px] font-semibold text-slate-400">เพิ่มสินค้าเข้าพิกัด</p>
+                            <p class="text-sm font-bold text-brand-blue">ชั้น ${floor} › โซน ${zone}</p>
+                        </div>
+                        <button onclick="closeZonePopupAdd()" class="p-2 rounded-full hover:bg-slate-100 transition-colors">
+                            <span class="material-icons-round text-slate-400">close</span>
+                        </button>
+                    </div>
+                    
+                    <!-- ค้นหาภายใน Popup -->
+                    <div class="p-3 bg-white border-b border-slate-100">
+                        <input type="text" id="zone-popup-search-input" value="${state.zonePopupSearch || ''}" 
+                            placeholder="🔍 ค้นหาสินค้าที่ยังไม่มีโลเคชั่น..."
+                            oninput="updateZonePopupSearch(this.value)"
+                            class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:border-indigo-500 focus:bg-white transition-all"
+                            autocomplete="off">
+                    </div>
+                    
+                    <!-- รายการสินค้า -->
+                    <div id="zone-popup-list" class="flex-1 overflow-y-auto p-4">
+                        ${renderZonePopupListHTML(sliced, totalCount)}
+                    </div>
+                    
+                    <!-- ปุ่มบันทึก -->
+                    <div class="p-4 bg-white border-t border-slate-100">
+                        <button onclick="${canSave ? 'confirmZonePopupAdd()' : ''}"
+                                class="w-full py-4 rounded-2xl font-bold text-base transition-all active:scale-[0.98]
+                                       ${canSave ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}">
+                            ✓ ย้ายเข้าโซน ${zone} (${selectedCount} รายการ)
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderAddZoneModal() {
+            if (!state.showAddZoneModal) return '';
+            const val = state.newZoneNameInput || '';
+            return `
+                <div onclick="closeAddZoneModal()" class="fixed inset-0 bg-black/40 z-[999] flex items-center justify-center p-4">
+                    <div onclick="event.stopPropagation()" class="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl animate-fade-in">
+                        <div class="flex items-center gap-3 mb-4">
+                            <div class="p-2.5 bg-indigo-50 text-indigo-600 rounded-2xl">
+                                <span class="material-icons-round">add_location_alt</span>
+                            </div>
+                            <div>
+                                <h3 class="text-base font-bold text-slate-800">เพิ่มโซนใหม่</h3>
+                                <p class="text-[11px] text-slate-400">ระบุชื่อโซนสำหรับ ชั้น ${state.locationFloorFilter || '1'}</p>
+                            </div>
+                        </div>
+                        
+                        <form onsubmit="event.preventDefault(); submitAddZoneModal();" class="space-y-4">
+                            <div>
+                                <input type="text" id="new-zone-name-input" value="${val}"
+                                    placeholder="เช่น 1A, 2B, A-03" 
+                                    oninput="state.newZoneNameInput = this.value.toUpperCase();"
+                                    class="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold uppercase focus:border-indigo-500 focus:bg-white focus:outline-none transition-all"
+                                    autocomplete="off"
+                                    autofocus>
+                            </div>
+                            
+                            <div class="flex gap-3">
+                                <button type="button" onclick="closeAddZoneModal()" 
+                                        class="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl font-bold text-xs active:scale-[0.98] transition-all">
+                                    ยกเลิก
+                                </button>
+                                <button type="submit" 
+                                        class="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold text-xs shadow-md shadow-indigo-100 active:scale-[0.98] transition-all">
+                                    ยืนยัน
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
         }
 
         function parseFormattedDate(str) {
@@ -1989,6 +2557,10 @@
             const par   = state.locationSheetParLevel  || '';
             const FLOORS = ['1','2','3','4','5'];
 
+            const isBulk = name === 'BULK_MODE';
+            const selectedCount = isBulk ? Object.keys(state.locationSelectedItems).length : 0;
+            const displayTitle = isBulk ? `จัดพิกัดสินค้าแบบกลุ่ม (${selectedCount} รายการ)` : name;
+
             let existingZones = [];
             if (floor && floor !== 'NOSTK') {
                 const zSet = new Set();
@@ -2004,11 +2576,11 @@
 
             return `
                 <div onclick="closeLocationSheet()" class="fixed inset-0 bg-black/40 z-40"></div>
-                <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white rounded-t-[2rem] z-50 shadow-2xl" style="max-height:90vh;overflow-y:auto">
+                <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white rounded-t-[2rem] z-50 shadow-2xl animate-slide-up" style="max-height:90vh;overflow-y:auto">
                     <div class="flex items-center justify-between p-4 border-b border-slate-100">
                         <div>
-                            <p class="text-[11px] font-semibold text-slate-400">กำหนดโลเคชั่น</p>
-                            <p class="text-sm font-bold text-brand-blue truncate" style="max-width:260px">${name}</p>
+                            <p class="text-[11px] font-semibold text-slate-400">${isBulk ? 'จัดพิกัดกลุ่ม' : 'กำหนดโลเคชั่น'}</p>
+                            <p class="text-sm font-bold text-brand-blue truncate" style="max-width:260px">${displayTitle}</p>
                         </div>
                         <button onclick="closeLocationSheet()" class="p-2 rounded-full hover:bg-slate-100 transition-colors">
                             <span class="material-icons-round text-slate-400">close</span>
@@ -2055,9 +2627,9 @@
                         </div>` : ''}
 
                         <div>
-                            <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Par Level <span class="font-normal normal-case text-slate-400">(ไม่บังคับ)</span></p>
+                            <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Par Level <span class="font-normal normal-case text-slate-400">${isBulk ? '(ไม่บังคับ - ปล่อยว่างเพื่อไม่เปลี่ยน)' : '(ไม่บังคับ)'}</span></p>
                             <input type="number" min="0" value="${par}"
-                                placeholder="ยอดสต๊อกเต็ม"
+                                placeholder="${isBulk ? 'ปล่อยว่างไว้เพื่อคงค่า Par เดิมของแต่ละสินค้า' : 'ยอดสต๊อกเต็ม'}"
                                 oninput="state.locationSheetParLevel=this.value"
                                 class="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-center focus:border-brand-orange focus:bg-white transition-all">
                         </div>
@@ -2092,6 +2664,29 @@
                 ? `<span class="text-[10px] font-medium text-slate-400 ml-1">Par: <span class="font-bold text-slate-600">${prod.parLevel}</span></span>`
                 : '';
 
+            if (state.locationBulkMode) {
+                const isSelected = !!state.locationSelectedItems[prod.name];
+                const bgClass = isSelected ? 'bg-indigo-55 bg-indigo-50/50 border-indigo-300 shadow-md shadow-indigo-50/10' : `${borderClass} bg-white`;
+                const checkIcon = isSelected ? 'check_box' : 'check_box_outline_blank';
+                const checkColor = isSelected ? 'text-indigo-600 font-bold' : 'text-slate-300';
+                
+                return `
+                    <div onclick="toggleBulkItemSelect(decodeURIComponent('${enc}'))"
+                         id="bulk-row-${enc}"
+                         class="p-3.5 rounded-2xl border shadow-sm mb-2.5 flex items-center justify-between gap-3 cursor-pointer transition-all ${bgClass}">
+                        <div class="flex-1 min-w-0">
+                            <p class="font-bold text-brand-blue text-sm leading-snug truncate mb-1">${prod.name}</p>
+                            <div class="flex items-center flex-wrap gap-1">
+                                ${locationChip}
+                                ${parBadge}
+                            </div>
+                        </div>
+                        <span id="bulk-check-${enc}" class="material-icons-round ${checkColor} text-[24px] flex-shrink-0 select-none">
+                            ${checkIcon}
+                        </span>
+                    </div>`;
+            }
+
             const btnLabel = isMissing ? '📍 กำหนด' : '✏️ แก้ไข';
             const btnClass = isMissing
                 ? 'bg-indigo-600 text-white'
@@ -2115,21 +2710,78 @@
 
         function updateLocationSearch(value) {
             state.locationSearch = value;
-            const search = value.toLowerCase().trim();
-            // When searching: scan non-NOSTK products. When empty: show missing only (up to 20).
-            const filtered = search
-                ? state.products.filter(p => p.floor !== 'NOSTK' && p.name.toLowerCase().includes(search))
-                : state.products.filter(p => !p.floor);
+            state.locationLimit = 40; // รีเซ็ต limit เมื่อพิมพ์ค้นหา
             const listEl = document.getElementById('location-list');
-            if (!listEl) return;
-            if (filtered.length === 0) {
-                listEl.innerHTML = `<div class="flex flex-col items-center justify-center py-16 text-slate-400">
-                    <span class="material-icons-round text-[40px] mb-2">check_circle_outline</span>
-                    <p class="text-sm font-medium">${search ? 'ไม่พบสินค้าที่ค้นหา' : 'สินค้าทุกรายการมีโลเคชั่นแล้ว 🎉'}</p>
-                </div>`;
-            } else {
-                listEl.innerHTML = filtered.map(renderLocationRow).join('');
+            if (listEl) {
+                listEl.innerHTML = renderLocationListHTML();
             }
+        }
+
+        function renderLocationListHTML() {
+            const floorF = state.locationFloorFilter;
+            const zoneF  = state.locationZoneFilter;
+            const search = (state.locationSearch || '').toLowerCase().trim();
+
+            let displayList = [];
+            if (floorF === '') {
+                displayList = state.products.filter(p => !p.floor);
+            } else {
+                if (floorF === 'NOSTK') {
+                    displayList = state.products.filter(p => p.floor === 'NOSTK');
+                } else if (floorF && zoneF) {
+                    displayList = state.products.filter(p => p.floor === floorF && extractZone(p.location) === zoneF);
+                } else if (floorF) {
+                    displayList = state.products.filter(p => p.floor === floorF);
+                }
+            }
+
+            if (search) {
+                displayList = displayList.filter(p => (p.name || '').toLowerCase().includes(search));
+            }
+
+            const totalCount = displayList.length;
+            const sliced = displayList.slice(0, state.locationLimit);
+
+            const emptyMsg = search ? 'ไม่พบสินค้าที่ค้นหา'
+                : floorF === 'NOSTK' ? 'ยังไม่มีสินค้ากลุ่มนี้'
+                : floorF && zoneF ? `ยังไม่มีสินค้าในโซน ${zoneF}`
+                : floorF ? `ยังไม่มีสินค้าในชั้น ${floorF}`
+                : 'สินค้าทุกรายการมีโลเคชั่นแล้ว 🎉';
+
+            if (totalCount === 0) {
+                return `
+                    <div class="flex flex-col items-center justify-center py-16 text-slate-400 animate-fade-in">
+                        <span class="material-icons-round text-[40px] mb-2">check_circle_outline</span>
+                        <p class="text-sm font-medium text-center px-4">${emptyMsg}</p>
+                    </div>`;
+            }
+
+            let html = '';
+            
+            // เพิ่มปุ่มเลือกทั้งหมดในโหมดจัดกลุ่มหากมีรายการแสดงผล
+            if (state.locationBulkMode && sliced.length > 0) {
+                const allSelected = sliced.every(p => !!state.locationSelectedItems[p.name]);
+                html += `
+                    <div onclick="toggleVisibleBulkSelect(this)" class="bg-indigo-50/20 p-3 rounded-2xl border border-indigo-100 shadow-sm mb-3 flex items-center gap-3 cursor-pointer hover:bg-indigo-50/40 active:scale-[0.99] transition-all">
+                        <span class="material-icons-round ${allSelected ? 'text-indigo-600 font-bold' : 'text-slate-300'} text-[24px] select-none">
+                            ${allSelected ? 'check_box' : 'check_box_outline_blank'}
+                        </span>
+                        <span class="text-xs font-bold text-indigo-900">เลือกทั้งหมดที่แสดงอยู่ในจอนี้ (${sliced.length} รายการ)</span>
+                    </div>`;
+            }
+
+            html += sliced.map(renderLocationRow).join('');
+
+            if (totalCount > state.locationLimit) {
+                html += `
+                    <div class="p-3 text-center">
+                        <button onclick="loadMoreLocationItems()" class="w-full py-3 bg-white border border-slate-200 text-brand-blue rounded-2xl text-xs font-bold shadow-sm active:scale-[0.98] transition-all">
+                            แสดงเพิ่มอีก 40 รายการ (เหลืออีก ${totalCount - state.locationLimit} รายการ)
+                        </button>
+                    </div>`;
+            }
+
+            return html;
         }
 
         function renderLocationManager() {
@@ -2139,36 +2791,22 @@
             const FLOORS  = ['1','2','3','4','5'];
 
             const missingCount = state.products.filter(p => !p.floor).length;
+            const assignedCount = state.products.filter(p => p.floor).length;
 
             let zones = [];
             if (floorF && floorF !== 'NOSTK') {
                 const zSet = new Set();
                 state.products.filter(p => p.floor === floorF && p.location)
                     .forEach(p => { const z = extractZone(p.location); if (z) zSet.add(z); });
+                // ดึงโซนชั่วคราวเข้ามาแสดงด้วย
+                if (state.tempZones) {
+                    state.tempZones.forEach(z => zSet.add(z));
+                }
                 zones = [...zSet].sort();
             }
 
-            let displayList = [];
-            if (search) {
-                displayList = state.products.filter(p => p.floor !== 'NOSTK' && p.name.toLowerCase().includes(search));
-            } else if (floorF === 'NOSTK') {
-                displayList = state.products.filter(p => p.floor === 'NOSTK');
-            } else if (floorF && zoneF) {
-                displayList = state.products.filter(p => p.floor === floorF && extractZone(p.location) === zoneF);
-            } else if (floorF) {
-                displayList = state.products.filter(p => p.floor === floorF);
-            } else {
-                displayList = state.products.filter(p => !p.floor);
-            }
-
-            const emptyMsg = search ? 'ไม่พบสินค้าที่ค้นหา'
-                : floorF === 'NOSTK' ? 'ยังไม่มีสินค้ากลุ่มนี้'
-                : floorF && zoneF ? `ยังไม่มีสินค้าในโซน ${zoneF}`
-                : floorF ? `ยังไม่มีสินค้าในชั้น ${floorF}`
-                : 'สินค้าทุกรายการมีโลเคชั่นแล้ว 🎉';
-
             return `
-                <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative animate-fade-in">
+                <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative animate-fade-in pb-16">
                     <header class="bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
                         <div class="flex items-center gap-2">
                             <button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
@@ -2181,29 +2819,52 @@
                                 ${floorF || zoneF ? `<p class="text-[11px] text-white/70 mt-0.5">${floorF ? (floorF === 'NOSTK' ? 'ไม่มีพื้นที่จัด' : 'ชั้น ' + floorF) : ''}${zoneF ? ' › โซน ' + zoneF : ''}</p>` : ''}
                             </div>
                         </div>
-                        <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
-                            <span class="material-icons-round text-[20px]">refresh</span>
-                        </button>
+                        <div class="flex items-center gap-1">
+                            <button onclick="toggleBulkMode()" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white relative" title="จัดโลเคชั่นแบบกลุ่ม">
+                                <span class="material-icons-round text-[20px]">${state.locationBulkMode ? 'check_box' : 'checklist'}</span>
+                                ${state.locationBulkMode ? '<span class="absolute top-1 right-1 w-2 h-2 bg-emerald-400 rounded-full"></span>' : ''}
+                            </button>
+                            <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white" title="รีเฟรชข้อมูล">
+                                <span class="material-icons-round text-[20px]">refresh</span>
+                            </button>
+                        </div>
                     </header>
 
-                    <div class="bg-white border-b border-slate-100 px-3 py-2.5 overflow-x-auto flex gap-2 shadow-sm">
-                        <button onclick="setLocationFloor('')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${!floorF ? 'bg-rose-500 text-white' : 'bg-white border border-slate-200 text-slate-500'}">
-                            ยังไม่มีโลเคชั่น ${missingCount > 0 ? `<span class="ml-1 ${!floorF ? 'bg-white/30 text-white' : 'bg-rose-100 text-rose-600'} text-[10px] px-1 rounded-full">${missingCount}</span>` : ''}
+                    <!-- แท็บหลักแบ่งแยกชัดเจนตามคำแนะนำผู้ใช้งาน -->
+                    <div class="bg-white border-b border-slate-100 flex sticky top-[57px] z-10 shadow-sm">
+                        <button onclick="setLocationTab('missing')" 
+                                class="flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all 
+                                       ${floorF === '' ? 'border-rose-500 text-rose-600' : 'border-transparent text-slate-500'}">
+                            ยังไม่มีโลเคชั่น ${missingCount > 0 ? `<span class="ml-1 bg-rose-100 text-rose-600 text-[10px] px-1.5 py-0.5 rounded-full font-bold">${missingCount}</span>` : ''}
                         </button>
-                        ${FLOORS.map(f => {
-                            const cnt = state.products.filter(p => p.floor === f).length;
-                            return `<button onclick="setLocationFloor('${f}')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${floorF === f ? 'bg-brand-blue text-white' : 'bg-white border border-slate-200 text-slate-500'}">ชั้น ${f}${cnt > 0 ? ` <span class="text-[10px] opacity-70">(${cnt})</span>` : ''}</button>`;
-                        }).join('')}
-                        <button onclick="setLocationFloor('NOSTK')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${floorF === 'NOSTK' ? 'bg-slate-600 text-white' : 'bg-white border border-slate-200 text-slate-500'}">❌ NOSTK</button>
+                        <button onclick="setLocationTab('assigned')" 
+                                class="flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all 
+                                       ${floorF !== '' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-500'}">
+                            จัดแล้ว ${assignedCount > 0 ? `<span class="ml-1 bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded-full font-bold">${assignedCount}</span>` : ''}
+                        </button>
                     </div>
 
+                    <!-- ฟิลเตอร์ตัวเลือกชั้น (แสดงเฉพาะแท็บ "จัดแล้ว") -->
+                    ${floorF !== '' ? `
+                    <div class="bg-white border-b border-slate-100 px-3 py-2.5 overflow-x-auto flex gap-2 shadow-sm">
+                        ${FLOORS.map(f => {
+                            const cnt = state.products.filter(p => p.floor === f).length;
+                            return `<button onclick="setLocationFloor('${f}')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${floorF === f ? 'bg-brand-blue text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500'}">ชั้น ${f}${cnt > 0 ? ` <span class="text-[10px] opacity-70">(${cnt})</span>` : ''}</button>`;
+                        }).join('')}
+                        <button onclick="setLocationFloor('NOSTK')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${floorF === 'NOSTK' ? 'bg-slate-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500'}">❌ NOSTK</button>
+                    </div>` : ''}
+
+                    <!-- ตัวเลือกโซนพร้อมปุ่มเพิ่มโซนใหม่ -->
                     ${floorF && floorF !== 'NOSTK' ? `
-                    <div class="bg-white border-b border-slate-100 px-3 py-2 overflow-x-auto flex gap-2">
-                        <button onclick="setLocationZone('')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${!zoneF ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-500'}">ทุกโซน</button>
+                    <div class="bg-white border-b border-slate-100 px-3 py-2 overflow-x-auto flex gap-2 shadow-sm">
+                        <button onclick="setLocationZone('')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${!zoneF ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500'}">ทุกโซน</button>
                         ${zones.map(z => {
                             const cnt = state.products.filter(p => p.floor === floorF && extractZone(p.location) === z).length;
-                            return `<button onclick="setLocationZone('${z}')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${zoneF === z ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-500'}">โซน ${z} (${cnt})</button>`;
+                            return `<button onclick="setLocationZone('${z}')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${zoneF === z ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500'}">โซน ${z} (${cnt})</button>`;
                         }).join('')}
+                        <button onclick="openAddZoneDialog()" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 flex items-center gap-1 active:scale-95 transition-all">
+                            <span class="material-icons-round text-[12px]">add</span> โซนใหม่
+                        </button>
                     </div>` : ''}
 
                     ${floorF === 'NOSTK' ? `
@@ -2217,17 +2878,29 @@
                             class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:border-brand-blue focus:bg-white transition-all">
                     </div>
 
-                    <main id="location-list" class="flex-1 overflow-y-auto p-4 pb-8">
-                        ${search ? `<p class="text-[11px] text-slate-400 font-medium mb-3 px-1">ผลการค้นหา <span class="font-bold text-brand-blue">${displayList.length} รายการ</span></p>` : ''}
-                        ${displayList.length === 0
-                            ? `<div class="flex flex-col items-center justify-center py-16 text-slate-400">
-                                <span class="material-icons-round text-[40px] mb-2">check_circle_outline</span>
-                                <p class="text-sm font-medium text-center px-4">${emptyMsg}</p>
-                               </div>`
-                            : displayList.map(renderLocationRow).join('')}
+                    <!-- ปุ่มเพิ่มสินค้าเข้าโซนเมื่อเจาะจงโซนแล้ว -->
+                    ${floorF && zoneF && floorF !== 'NOSTK' ? `
+                    <div class="px-3 py-2 bg-white border-b border-slate-100 flex justify-center">
+                        <button onclick="openZonePopupAdd()" 
+                                class="w-full py-2.5 bg-indigo-600 text-white rounded-2xl text-xs font-bold shadow-md shadow-indigo-100 flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all">
+                            <span class="material-icons-round text-[18px]">add_circle</span>
+                            เพิ่มสินค้าในโซน ${zoneF}
+                        </button>
+                    </div>` : ''}
+
+                    <!-- รายการสินค้า ค่อยดึงแบบ Dynamic โหลดเร็วแบบ Lazy Load -->
+                    <main id="location-list" class="flex-1 overflow-y-auto p-4 pb-16">
+                        ${renderLocationListHTML()}
                     </main>
 
+                    <!-- สำหรับส่วนควบคุมการสั่งการกลุ่มลอยล่างจอ -->
+                    <div id="bulk-action-bar">
+                        ${state.locationBulkMode ? setTimeout(updateBulkActionBar, 50) && '' : ''}
+                    </div>
+
                     ${renderLocationSheet()}
+                    ${renderZonePopupAdd()}
+                    ${renderAddZoneModal()}
                 </div>`;
         }
 
