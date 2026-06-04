@@ -270,6 +270,7 @@
             w1Tab: 'request',
             w2Tab: 'tasks',
             w2BatchEdits: {},
+            w2PartialQty: {},
             dashboardFilter: 'week',
             items: [],
             products: [],
@@ -1262,7 +1263,7 @@
             render();
         }
         function setW1Tab(tabName) { state.w1Tab = tabName; render(); }
-        function setW2Tab(tabName) { state.w2Tab = tabName; state.w2BatchEdits = {}; render(); }
+        function setW2Tab(tabName) { state.w2Tab = tabName; state.w2BatchEdits = {}; state.w2PartialQty = {}; render(); }
 
         async function clearAllStockout() {
             const stockoutItems = state.items.filter(i => i.status === 'สินค้าหมด');
@@ -1290,21 +1291,43 @@
         function getEffectiveState(item) {
             const edit = state.w2BatchEdits[item.id];
             if (edit === 'dispatch') return 'dispatch';
+            if (edit === 'partial')  return 'partial';
             if (edit === 'outstock') return 'outstock';
             return item.status === 'สินค้าหมด' ? 'outstock' : 'pending';
+        }
+
+        function updatePartialQty(id, val) {
+            if (!state.w2PartialQty) state.w2PartialQty = {};
+            state.w2PartialQty[id] = parseInt(val) || 0;
+            // อัปเดต shortage label โดยตรง ไม่ full render
+            const item = state.items.find(i => i.id === id);
+            if (!item) return;
+            const qty = state.w2PartialQty[id];
+            const shortage = item.requestQty - qty;
+            const el = document.getElementById('partial-shortage-' + encodeURIComponent(id));
+            if (el) {
+                el.textContent = (qty > 0 && shortage > 0) ? `ขาด ${shortage} ${getProductUnitClient(item.itemName)}` : '';
+                el.className = 'text-[10px] font-bold text-center mt-1 ' + (shortage > 0 && qty > 0 ? 'text-amber-600' : 'text-transparent');
+            }
         }
 
         function toggleW2BatchItem(id) {
             const item = state.items.find(i => i.id === id);
             if (!item) return;
             const cur = getEffectiveState(item);
+            if (!state.w2PartialQty) state.w2PartialQty = {};
+
             if (cur === 'pending') {
                 state.w2BatchEdits[id] = 'dispatch';
             } else if (cur === 'dispatch') {
+                state.w2BatchEdits[id] = 'partial';
+                // ตั้งค่า default partial qty
+                if (!state.w2PartialQty[id]) state.w2PartialQty[id] = 0;
+            } else if (cur === 'partial') {
                 state.w2BatchEdits[id] = 'outstock';
+                delete state.w2PartialQty[id];
             } else {
-                // outstock → ถ้า item เดิมเป็น สินค้าหมด ให้วนไป dispatch ได้ (สต๊อกเข้าแล้ว)
-                // ถ้า item เดิมเป็น pending ให้ delete กลับ pending
+                // outstock → กลับ pending (หรือ dispatch ถ้าเป็น สินค้าหมด เดิม)
                 if (item.status === 'สินค้าหมด') state.w2BatchEdits[id] = 'dispatch';
                 else delete state.w2BatchEdits[id];
             }
@@ -1362,7 +1385,7 @@
                 if (!d || isNaN(d.getTime())) return;
                 const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
                 if (!map[key]) map[key] = { billCount: 0, hasStockout: false, qty: 0 };
-                if (item.status === 'จัดส่งแล้ว' || item.status === 'รับสินค้าแล้ว') {
+                if (item.status === 'จัดส่งแล้ว' || item.status === 'จัดส่งไม่ครบ' || item.status === 'รับสินค้าแล้ว') {
                     map[key].billCount++;
                     map[key].qty += parseInt(item.receiveQty) || 0;
                 }
@@ -1724,8 +1747,9 @@
             const styles = {
                 'สั่งเบิก': 'bg-brand-blue/10 text-brand-blue border-brand-blue/20',
                 'กำลังจัดสินค้า': 'bg-brand-orange text-white shadow-sm shadow-brand-orange/30',
-                'จัดส่งแล้ว': 'bg-emerald-50 text-emerald-700 border-emerald-200/60',
-                'สินค้าหมด': 'bg-rose-50 text-rose-700 border-rose-200/60',
+                'จัดส่งแล้ว':   'bg-emerald-50 text-emerald-700 border-emerald-200/60',
+                'จัดส่งไม่ครบ': 'bg-amber-50 text-amber-700 border-amber-200/60',
+                'สินค้าหมด':    'bg-rose-50 text-rose-700 border-rose-200/60',
                 'ยกเลิกรายการ': 'bg-slate-50 text-slate-400 border-slate-200'
             };
             return `<span class="px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wide uppercase border ${styles[status] || 'bg-slate-100'}">${status}</span>`;
@@ -1739,7 +1763,7 @@
         }
 
         function renderHistoryList(role) {
-            const historyItems = state.items.filter(i => ['จัดส่งแล้ว', 'ยกเลิกรายการ'].includes(i.status));
+            const historyItems = state.items.filter(i => ['จัดส่งแล้ว', 'จัดส่งไม่ครบ', 'ยกเลิกรายการ'].includes(i.status));
             if (historyItems.length === 0) return renderEmptyState('ไม่มีประวัติย้อนหลัง', 'history_toggle_off');
 
             return `<div class="space-y-4">
@@ -1774,21 +1798,25 @@
                                     ${item.dispatchTimestamp ? `
                                         <span class="inline-flex items-center gap-0.5">
                                             <span class="material-icons-round text-[13px] ${
-                                                item.status === 'จัดส่งแล้ว' ? 'text-emerald-500' :
-                                                item.status === 'สินค้าหมด' ? 'text-rose-500' : 'text-slate-400'
+                                                item.status === 'จัดส่งแล้ว'   ? 'text-emerald-500' :
+                                                item.status === 'จัดส่งไม่ครบ' ? 'text-amber-500' :
+                                                item.status === 'สินค้าหมด'    ? 'text-rose-500' : 'text-slate-400'
                                             }">
                                                 ${
-                                                    item.status === 'จัดส่งแล้ว' ? 'local_shipping' :
-                                                    item.status === 'สินค้าหมด' ? 'error_outline' : 'cancel'
+                                                    item.status === 'จัดส่งแล้ว'   ? 'local_shipping' :
+                                                    item.status === 'จัดส่งไม่ครบ' ? 'local_shipping' :
+                                                    item.status === 'สินค้าหมด'    ? 'error_outline' : 'cancel'
                                                 }
                                             </span>
                                             <span class="font-semibold ${
-                                                item.status === 'จัดส่งแล้ว' ? 'text-emerald-600' :
-                                                item.status === 'สินค้าหมด' ? 'text-rose-600' : 'text-slate-500'
+                                                item.status === 'จัดส่งแล้ว'   ? 'text-emerald-600' :
+                                                item.status === 'จัดส่งไม่ครบ' ? 'text-amber-600' :
+                                                item.status === 'สินค้าหมด'    ? 'text-rose-600' : 'text-slate-500'
                                             }">
                                                 ${
-                                                    item.status === 'จัดส่งแล้ว' ? 'จัดส่ง:' :
-                                                    item.status === 'สินค้าหมด' ? 'แจ้งหมดเมื่อ:' : 'ยกเลิกเมื่อ:'
+                                                    item.status === 'จัดส่งแล้ว'   ? 'จัดส่ง:' :
+                                                    item.status === 'จัดส่งไม่ครบ' ? 'จัดส่ง:' :
+                                                    item.status === 'สินค้าหมด'    ? 'แจ้งหมดเมื่อ:' : 'ยกเลิกเมื่อ:'
                                                 }
                                             </span> ${item.dispatchTimestamp}
                                         </span>
@@ -1798,6 +1826,24 @@
                                     <p class="mt-1 text-slate-600">เบิก <span class="font-semibold text-slate-700">${item.requestQty} ${getProductUnitClient(item.itemName)}</span> (ความจุ ${item.storageCapacity || 0}) • ส่งจริง <span class="font-semibold text-emerald-600">${item.receiveQty} ${getProductUnitClient(item.itemName)}</span></p>
                                     ${role === 'w1' ? `<p class="text-[11px] text-brand-blue font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">hourglass_empty</span> EXP ใหม่: ${item.newExpiry}</p>` : ''}
                                 ` : ''}
+                                ${item.status === 'จัดส่งไม่ครบ' ? (() => {
+                                    const shortage = item.requestQty - (item.receiveQty || 0);
+                                    return `
+                                    <div class="mt-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                                        <div class="flex items-center justify-between text-sm">
+                                            <span class="text-slate-500">สั่ง</span>
+                                            <span class="font-bold text-slate-700">${item.requestQty} ${getProductUnitClient(item.itemName)}</span>
+                                        </div>
+                                        <div class="flex items-center justify-between text-sm mt-0.5">
+                                            <span class="text-slate-500">ได้รับ</span>
+                                            <span class="font-bold text-amber-700">${item.receiveQty || 0} ${getProductUnitClient(item.itemName)}</span>
+                                        </div>
+                                        <div class="flex items-center justify-between text-sm mt-0.5 pt-1.5 border-t border-amber-200">
+                                            <span class="font-bold text-rose-600">ขาด</span>
+                                            <span class="font-black text-rose-600">${shortage} ${getProductUnitClient(item.itemName)}</span>
+                                        </div>
+                                    </div>`;
+                                })() : ''}
                             </div>
                             ${item.status === 'จัดส่งแล้ว' && item.receiveNote && item.receiveNote !== 'ครบ' ? `<div class="text-[10px] font-medium text-brand-orange bg-brand-orange/5 px-2 py-0.5 rounded-md border border-brand-orange/20 mt-1">จัดส่ง${item.receiveNote}</div>` : ''}
                         </div>
@@ -2724,20 +2770,27 @@
             const st    = getEffectiveState(item);
             const unit  = getProductUnitClient(item.itemName);
             const enc   = encodeURIComponent(item.id);
+            const partialQty = (state.w2PartialQty || {})[item.id] || 0;
+            const shortage   = partialQty > 0 ? item.requestQty - partialQty : 0;
 
             let boxClass, boxContent, rowBg, nameClass, subExtra = '';
             if (st === 'dispatch') {
                 boxClass   = 'bg-emerald-500 text-white';
-                boxContent = '✓';
-                rowBg      = 'bg-emerald-50 border-emerald-100';
+                boxContent = '<span class="material-icons-round text-[18px]">check</span>';
+                rowBg      = 'bg-emerald-50 border-emerald-200';
                 nameClass  = 'font-bold text-emerald-800';
+            } else if (st === 'partial') {
+                boxClass   = 'bg-amber-400 text-white';
+                boxContent = '<span class="material-icons-round text-[18px]">remove</span>';
+                rowBg      = 'bg-amber-50 border-amber-200';
+                nameClass  = 'font-bold text-amber-800';
             } else if (st === 'outstock') {
-                boxClass   = 'bg-rose-100 text-rose-500';
-                boxContent = '✕';
-                rowBg      = 'bg-rose-50 border-rose-100';
+                boxClass   = 'bg-rose-500 text-white';
+                boxContent = '<span class="material-icons-round text-[18px]">close</span>';
+                rowBg      = 'bg-rose-50 border-rose-200';
                 nameClass  = 'font-semibold text-rose-400 line-through';
                 if (item.dispatchTimestamp && item.dispatchTimestamp !== '-') {
-                    subExtra = ` <span class="text-rose-300">· หมด ${item.dispatchTimestamp}</span>`;
+                    subExtra = `<span class="text-rose-300">· หมด ${item.dispatchTimestamp}</span>`;
                 }
             } else {
                 boxClass   = 'border-2 border-slate-200 bg-white';
@@ -2746,35 +2799,77 @@
                 nameClass  = 'font-semibold text-brand-blue';
             }
 
+            const partialInput = st === 'partial' ? `
+                <div onclick="event.stopPropagation()" class="px-3.5 pb-3.5 -mt-1">
+                    <div class="bg-white border border-amber-300 rounded-2xl p-3 flex items-center gap-2.5 shadow-sm">
+                        <span class="material-icons-round text-amber-500 text-[18px] flex-shrink-0">edit</span>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-[10px] font-bold text-amber-700 mb-1">ส่งได้จริง (สั่ง ${item.requestQty} ${unit})</p>
+                            <input type="number" min="0" max="${item.requestQty}"
+                                   value="${partialQty || ''}"
+                                   placeholder="0"
+                                   oninput="updatePartialQty(decodeURIComponent('${enc}'), this.value)"
+                                   class="w-full text-center text-lg font-black text-amber-800 bg-amber-50 border border-amber-200 rounded-xl py-2 focus:border-amber-400 focus:outline-none transition-all">
+                        </div>
+                        <span class="text-xs font-bold text-amber-600 flex-shrink-0">${unit}</span>
+                    </div>
+                    <p id="partial-shortage-${enc}"
+                       class="text-[10px] font-bold text-center mt-1.5 ${shortage > 0 && partialQty > 0 ? 'text-amber-600' : 'text-transparent'}">
+                        ${shortage > 0 && partialQty > 0 ? `ขาด ${shortage} ${unit}` : '—'}
+                    </p>
+                </div>` : '';
+
             return `
-                <div onclick="toggleW2BatchItem(decodeURIComponent('${enc}'))"
-                     class="flex items-center gap-3 p-3.5 rounded-2xl border shadow-sm cursor-pointer active:scale-[0.99] transition-all ${rowBg}">
-                    <div class="w-8 h-8 flex-shrink-0 flex items-center justify-center text-sm font-bold rounded-lg ${boxClass}">${boxContent}</div>
-                    <div class="flex-1 min-w-0">
-                        <p class="text-sm leading-snug truncate ${nameClass}">${item.itemName}</p>
-                        <p class="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1 flex-wrap">
-                            ${item.requestedBy ? `<span class="font-medium text-slate-500">${item.requestedBy}</span><span>·</span>` : ''}
-                            <span class="font-medium text-slate-400">${item.timestamp || ''}</span>
-                            ${subExtra}
-                        </p>
+                <div class="rounded-2xl border shadow-sm mb-2 overflow-hidden ${rowBg}">
+                    <div onclick="toggleW2BatchItem(decodeURIComponent('${enc}'))"
+                         class="flex items-center gap-3 p-3.5 cursor-pointer active:scale-[0.99] transition-all select-none">
+                        <div class="w-9 h-9 flex-shrink-0 flex items-center justify-center font-bold rounded-xl ${boxClass}">${boxContent}</div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm leading-snug truncate ${nameClass}">${item.itemName}</p>
+                            <p class="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1 flex-wrap">
+                                ${item.requestedBy ? `<span class="font-medium text-slate-500">${item.requestedBy}</span><span>·</span>` : ''}
+                                <span>${item.timestamp || ''}</span>
+                                ${subExtra}
+                            </p>
+                        </div>
+                        <div class="flex-shrink-0 text-right">
+                            <p class="text-base font-black ${st === 'dispatch' ? 'text-emerald-600' : st === 'partial' ? 'text-amber-600' : st === 'outstock' ? 'text-rose-400 line-through' : 'text-brand-blue'}">${item.requestQty}</p>
+                            <p class="text-[9px] font-semibold text-slate-400 uppercase">${unit}</p>
+                        </div>
                     </div>
-                    <div class="flex-shrink-0 text-right">
-                        <p class="text-base font-black ${st === 'dispatch' ? 'text-emerald-600' : st === 'outstock' ? 'text-rose-400 line-through' : 'text-brand-blue'}">${item.requestQty}</p>
-                        <p class="text-[9px] font-semibold text-slate-400 uppercase">${unit}</p>
-                    </div>
+                    ${partialInput}
                 </div>`;
         }
 
         async function confirmBatchDispatch() {
-            const toDispatch = Object.entries(state.w2BatchEdits).filter(([, v]) => v === 'dispatch');
-            if (toDispatch.length === 0) { alert('เลือกสินค้าที่จะจัดส่งก่อน'); return; }
+            const edits = state.w2BatchEdits;
+            const dispatchCount = Object.values(edits).filter(v => v === 'dispatch').length;
+            const partialCount  = Object.values(edits).filter(v => v === 'partial').length;
+            const totalAction   = dispatchCount + partialCount;
+
+            if (totalAction === 0) { alert('เลือกสินค้าที่จะจัดส่งก่อน'); return; }
+
+            // ตรวจ partial ที่ยังไม่ได้กรอก qty
+            const missingQty = Object.entries(edits)
+                .filter(([, v]) => v === 'partial')
+                .filter(([id]) => !((state.w2PartialQty || {})[id] > 0));
+            if (missingQty.length > 0) {
+                const names = missingQty.map(([id]) => state.items.find(i => i.id === id)?.itemName || id).join(', ');
+                alert(`กรุณากรอกจำนวนที่ส่งได้จริงก่อน:\n${names}`);
+                return;
+            }
 
             const now = formatDateTime(new Date().toISOString());
 
             state.items = state.items.map(item => {
-                const edit = state.w2BatchEdits[item.id];
+                const edit = edits[item.id];
                 if (edit === 'dispatch') {
                     return { ...item, status: 'จัดส่งแล้ว', receiveQty: item.requestQty, receiveNote: 'ครบ', dispatchTimestamp: now };
+                }
+                if (edit === 'partial') {
+                    const actual   = (state.w2PartialQty || {})[item.id] || 0;
+                    const shortage = item.requestQty - actual;
+                    return { ...item, status: 'จัดส่งไม่ครบ', receiveQty: actual, receiveNote: `ส่ง ${actual}/${item.requestQty} ขาด ${shortage}`, dispatchTimestamp: now };
                 }
                 if (edit === 'outstock') {
                     return { ...item, status: 'สินค้าหมด', dispatchTimestamp: now };
@@ -2783,9 +2878,10 @@
             });
 
             state.w2BatchEdits = {};
+            state.w2PartialQty = {};
             render();
             await syncDataToSheet();
-            sendAppLog('จัดส่งสินค้า Batch (AKRA)', `จัดส่ง ${toDispatch.length} รายการ`);
+            sendAppLog('จัดส่งสินค้า Batch (AKRA)', `ครบ ${dispatchCount} · ไม่ครบ ${partialCount} รายการ`);
         }
 
         function renderW2() {
@@ -2805,28 +2901,35 @@
                     content = renderEmptyState('ไม่มีงานจัดสินค้า', 'inventory_2');
                 } else {
                     const dispatchCount = pendingTasks.filter(i => getEffectiveState(i) === 'dispatch').length;
+                    const partialCount  = pendingTasks.filter(i => getEffectiveState(i) === 'partial').length;
                     const pendingCount  = pendingTasks.filter(i => getEffectiveState(i) === 'pending').length;
+                    const actionCount   = dispatchCount + partialCount;
                     content = `
                         <div class="animate-fade-in">
-                            <div class="grid grid-cols-2 border border-slate-100 rounded-2xl overflow-hidden mb-4 bg-white shadow-sm">
+                            <div class="grid grid-cols-3 border border-slate-100 rounded-2xl overflow-hidden mb-4 bg-white shadow-sm">
                                 <div class="p-3 text-center ${dispatchCount > 0 ? 'bg-emerald-50' : ''}">
                                     <p class="text-xl font-black ${dispatchCount > 0 ? 'text-emerald-600' : 'text-slate-300'}">${dispatchCount}</p>
-                                    <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">เลือกจัดส่ง</p>
+                                    <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">ครบ</p>
                                 </div>
-                                <div class="p-3 text-center border-l border-slate-100">
+                                <div class="p-3 text-center border-x border-slate-100 ${partialCount > 0 ? 'bg-amber-50' : ''}">
+                                    <p class="text-xl font-black ${partialCount > 0 ? 'text-amber-500' : 'text-slate-300'}">${partialCount}</p>
+                                    <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">ไม่ครบ</p>
+                                </div>
+                                <div class="p-3 text-center">
                                     <p class="text-xl font-black ${pendingCount > 0 ? 'text-brand-blue' : 'text-slate-300'}">${pendingCount}</p>
                                     <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">รอจัด</p>
                                 </div>
                             </div>
+                            <p class="text-[10px] text-slate-400 text-center mb-3">แตะ 1 ครั้ง = ✅ ครบ · 2 ครั้ง = ⚠️ ไม่ครบ · 3 ครั้ง = ❌ หมด</p>
                             <div class="space-y-2">${pendingTasks.map(renderW2BatchRow).join('')}</div>
                             <div class="h-28"></div>
                         </div>
                         <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-100 p-4 shadow-2xl z-10">
-                            <p class="text-[10px] text-center text-slate-400 mb-2">✓ เลือกจัด ${dispatchCount} · รอ ${pendingCount} รายการ</p>
+                            <p class="text-[10px] text-center text-slate-400 mb-2">✅ ครบ ${dispatchCount} · ⚠️ ไม่ครบ ${partialCount} · รอ ${pendingCount}</p>
                             <button onclick="confirmBatchDispatch()"
                                     class="w-full py-4 rounded-2xl font-bold text-sm transition-all active:scale-[0.98]
-                                           ${dispatchCount > 0 ? 'bg-brand-blue text-white shadow-lg shadow-brand-blue/20' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}">
-                                🚚 ยืนยันจัดส่ง ${dispatchCount} รายการ
+                                           ${actionCount > 0 ? 'bg-brand-blue text-white shadow-lg shadow-brand-blue/20' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}">
+                                🚚 ยืนยันจัดส่ง ${actionCount} รายการ
                             </button>
                         </div>`;
                 }
