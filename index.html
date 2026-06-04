@@ -1787,7 +1787,7 @@
                                                 item.status === 'สินค้าหมด' ? 'text-rose-600' : 'text-slate-500'
                                             }">
                                                 ${
-                                                    item.status === 'จัดส่งแล้ว' ? 'จัด:' :
+                                                    item.status === 'จัดส่งแล้ว' ? 'จัดส่ง:' :
                                                     item.status === 'สินค้าหมด' ? 'แจ้งหมดเมื่อ:' : 'ยกเลิกเมื่อ:'
                                                 }
                                             </span> ${item.dispatchTimestamp}
@@ -2045,7 +2045,7 @@
                                         <span class="text-[10px] font-mono font-semibold text-brand-blue bg-brand-blue/10 px-2 py-0.5 rounded">${bill.id}</span>
                                         <div class="text-[9px] text-slate-400 flex items-center gap-2 flex-wrap">
                                             <span class="inline-flex items-center gap-0.5"><span class="material-icons-round text-[11px]">event_note</span>เบิก: ${bill.timestamp.split(' / ')[0]}</span>
-                                            ${bill.dispatchTimestamp ? `<span class="inline-flex items-center gap-0.5"><span class="material-icons-round text-[11px] text-emerald-500">local_shipping</span>จัด: ${bill.dispatchTimestamp.split(' / ')[0]}</span>` : ''}
+                                            ${bill.dispatchTimestamp ? `<span class="inline-flex items-center gap-0.5"><span class="material-icons-round text-[11px] text-emerald-500">local_shipping</span>จัดส่ง: ${bill.dispatchTimestamp.split(' / ')[0]}</span>` : ''}
                                         </div>
                                     </div>
                                     <p class="text-sm font-bold text-slate-800 mb-1 truncate">${bill.itemName}</p>
