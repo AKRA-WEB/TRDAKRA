@@ -26,11 +26,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         /* Custom Styles & Animations */
-        body { 
-            font-family: 'Sarabun', sans-serif; 
-            -webkit-tap-highlight-color: transparent; 
-            background-color: #f8fafc; /* slate-50 */
-            color: #1e293b; /* slate-800 */
+        body {
+            font-family: 'Sarabun', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            background-color: #f8fafc;
+            color: #1e293b;
         }
         .animate-fade-in { animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes fadeIn {
@@ -42,12 +42,9 @@
             from { transform: translate(-50%, 100%); opacity: 0; }
             to { transform: translate(-50%, 0); opacity: 1; }
         }
-        /* Hide scrollbar for cleaner look */
         ::-webkit-scrollbar { width: 0px; background: transparent; }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        
-        /* Loading Overlay */
         #loading-overlay {
             display: none;
             position: fixed;
@@ -57,12 +54,90 @@
             z-index: 9999;
             align-items: center; justify-content: center; flex-direction: column;
         }
-        
-        /* Smooth transitions for inputs */
         input, button { transition: all 0.2s ease-in-out; }
+
+        /* ── Desktop: Sidebar + Full-width Layout ── */
+        @media (min-width: 768px) {
+            body {
+                background: #0f1260;
+                min-height: 100vh;
+            }
+            #app-root {
+                display: flex !important;
+                min-height: 100vh;
+                width: 100%;
+                justify-content: flex-start !important;
+            }
+            #sidebar {
+                display: flex !important;
+                flex-direction: column;
+                width: 240px;
+                min-width: 240px;
+                flex-shrink: 0;
+                background: rgba(23,28,143,0.95);
+                border-right: 1px solid rgba(255,255,255,0.08);
+                color: white;
+                height: 100vh;
+                position: sticky;
+                top: 0;
+                overflow-y: auto;
+                overflow-x: hidden;
+                transition: width 0.22s cubic-bezier(0.4,0,0.2,1), min-width 0.22s cubic-bezier(0.4,0,0.2,1);
+            }
+            #sidebar.collapsed {
+                width: 64px !important;
+                min-width: 64px !important;
+            }
+            #sidebar.collapsed .sidebar-label,
+            #sidebar.collapsed .sidebar-sublabel,
+            #sidebar.collapsed .sidebar-logo-text,
+            #sidebar.collapsed .sidebar-user-detail {
+                display: none !important;
+            }
+            #sidebar.collapsed .sidebar-nav-btn {
+                justify-content: center !important;
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+            }
+            #sidebar.collapsed .sidebar-active-dot {
+                display: none !important;
+            }
+            /* Adjust bottom sheets when sidebar collapses */
+            #sidebar.collapsed ~ #main-view .animate-slide-up,
+            #sidebar.collapsed ~ * .animate-slide-up {
+                max-width: calc(100vw - 64px) !important;
+                left: calc(64px + (100vw - 64px) / 2) !important;
+            }
+            #main-view {
+                flex: 1;
+                min-height: 100vh;
+                background: #f1f5f9;
+                overflow-y: auto;
+                display: block;
+            }
+            /* Let each view fill full width — no card constraint */
+            #main-view > div {
+                max-width: none !important;
+                width: 100% !important;
+                min-height: 100vh;
+                border-radius: 0 !important;
+                box-shadow: none !important;
+                background: #f1f5f9 !important;
+            }
+            /* Override inner mobile max-width constraints */
+            #main-view .max-w-sm { max-width: none !important; }
+            /* Bottom sheets full viewport minus sidebar */
+            .animate-slide-up {
+                max-width: calc(100vw - 240px) !important;
+                left: calc(240px + (100vw - 240px) / 2) !important;
+            }
+        }
+        @media (max-width: 767px) {
+            #sidebar { display: none !important; }
+        }
     </style>
 </head>
-<body class="bg-[#f8fafc]">
+<body>
 
     <!-- Loading Overlay -->
     <div id="loading-overlay" class="flex">
@@ -71,7 +146,8 @@
     </div>
 
     <div id="app-root" class="min-h-screen flex justify-center">
-        <!-- Content will be injected here by JavaScript -->
+        <aside id="sidebar"></aside>
+        <div id="main-view" class="flex-1 flex justify-center min-h-screen"></div>
     </div>
 
     <script>
@@ -79,7 +155,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260603.01";
+        const CURRENT_VERSION = "20260604.01";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -202,6 +278,8 @@
             locationSearch: '',
             locationFloorFilter: '',
             locationZoneFilter: '',
+            locationBinFilter: '',
+            sidebarCollapsed: false,
             locationSheet: null,
             locationSheetFloor: '',
             locationSheetZoneInput: '',
@@ -421,19 +499,41 @@
         }
         function extractZone(location) {
             if (!location) return '';
-            return location.split('-')[0].trim();
+            // Handle full W1-2F-2B format (backward compat if ever stored)
+            if (/^W\d+-\d+F-/.test(location)) location = location.split('-').pop();
+            // Zone = leading digit(s) from bin code e.g. "2B" → "2", "12C" → "12"
+            const m = location.match(/^(\d+)/);
+            return m ? m[1] : location;
+        }
+
+        // Compose full display code e.g. floor="2", location="2B" → "W1-2F-2B"
+        function displayLocationCode(prod) {
+            if (!prod || !prod.floor) return null;
+            if (prod.floor === 'NOSTK') return 'NOSTK';
+            if (!prod.location) return `W1-${prod.floor}F`;
+            // If already full code, return as-is
+            if (/^W\d+-/.test(prod.location)) return prod.location;
+            return `W1-${prod.floor}F-${prod.location}`;
+        }
+
+        function setLocationBin(bin) {
+            state.locationBinFilter = state.locationBinFilter === bin ? '' : bin;
+            state.locationLimit = 40;
+            render();
         }
 
         function setLocationFloor(floor) {
             state.locationFloorFilter = floor;
             state.locationZoneFilter = '';
-            state.locationLimit = 40; // รีเซ็ตการแสดงผล
+            state.locationBinFilter = '';
+            state.locationLimit = 40;
             render();
         }
 
         function setLocationZone(zone) {
             state.locationZoneFilter = state.locationZoneFilter === zone ? '' : zone;
-            state.locationLimit = 40; // รีเซ็ตการแสดงผล
+            state.locationBinFilter = '';
+            state.locationLimit = 40;
             render();
         }
 
@@ -446,7 +546,8 @@
                 }
             }
             state.locationZoneFilter = '';
-            state.locationLimit = 40; // รีเซ็ตการแสดงผล
+            state.locationBinFilter = '';
+            state.locationLimit = 40;
             render();
         }
 
@@ -622,7 +723,7 @@
                     const selectedNames = Object.keys(state.locationSelectedItems);
                     await pushProductDetailsBatch(selectedNames, floor, floor === 'NOSTK' ? '' : zone, parLevel);
                     localStorage.removeItem('TRDAKRA_DATA');
-                    sendAppLog('จัดโลเคชั่นกลุ่ม (TRD)', `${selectedNames.length} รายการ → ชั้น ${floor} โซน ${zone}`);
+                    sendAppLog('จัดโลเคชั่นกลุ่ม (TRD)', `${selectedNames.length} รายการ → ${floor === 'NOSTK' ? 'NOSTK' : 'W1-' + floor + 'F-' + zone}`);
                     
                     // ล้างสเตตหลังบันทึกเสร็จ
                     state.locationSelectedItems = {};
@@ -630,7 +731,7 @@
                 } else {
                     await pushProductDetails(name, floor, floor === 'NOSTK' ? '' : zone, parLevel);
                     localStorage.removeItem('TRDAKRA_DATA');
-                    sendAppLog('จัดโลเคชั่นสินค้า (TRD)', `${name} → ชั้น ${floor} โซน ${zone}`);
+                    sendAppLog('จัดโลเคชั่นสินค้า (TRD)', `${name} → ${floor === 'NOSTK' ? 'NOSTK' : 'W1-' + floor + 'F-' + zone}`);
                 }
             } catch(e) {
                 hideLoading();
@@ -1163,6 +1264,29 @@
         function setW1Tab(tabName) { state.w1Tab = tabName; render(); }
         function setW2Tab(tabName) { state.w2Tab = tabName; state.w2BatchEdits = {}; render(); }
 
+        async function clearAllStockout() {
+            const stockoutItems = state.items.filter(i => i.status === 'สินค้าหมด');
+            if (stockoutItems.length === 0) return;
+            if (!confirm(`ล้างรายการสินค้าหมดทั้งหมด ${stockoutItems.length} รายการ?\nรายการจะย้ายไปประวัติ ไม่สามารถนำกลับมาได้`)) return;
+            showLoading('กำลังล้างรายการสินค้าหมด...');
+            const now = formatDateTime(new Date().toISOString());
+            state.items = state.items.map(i =>
+                i.status === 'สินค้าหมด'
+                    ? { ...i, status: 'ยกเลิกรายการ', dispatchTimestamp: now }
+                    : i
+            );
+            state.w2BatchEdits = {};
+            render();
+            await syncDataToSheet();
+            sendAppLog('ล้างสินค้าหมด (AKRA)', `${stockoutItems.length} รายการ → ยกเลิกรายการ`);
+            hideLoading();
+        }
+
+        function restoreStockoutItem(id) {
+            state.w2BatchEdits[id] = 'dispatch';
+            render();
+        }
+
         function getEffectiveState(item) {
             const edit = state.w2BatchEdits[item.id];
             if (edit === 'dispatch') return 'dispatch';
@@ -1317,14 +1441,70 @@
                 return;
             }
 
-            showLoading('กำลังส่งรายการเบิก...');
             const now = new Date();
             const timestamp = formatDateTime(now.toISOString());
 
-            const newItems = validRows.map(row => ({
+            // ── แยก: rows ที่มีรายการ "สินค้าหมด" อยู่แล้ว vs rows ใหม่ ──
+            const toRestore = [];  // { row, existingItem }
+            const toCreate  = [];  // row
+
+            for (const row of validRows) {
+                const stockoutMatch = state.items.find(i =>
+                    i.status === 'สินค้าหมด' && i.itemName === row.itemName
+                );
+                if (stockoutMatch) {
+                    toRestore.push({ row, existing: stockoutMatch });
+                } else {
+                    toCreate.push(row);
+                }
+            }
+
+            // ถ้ามี conflict — แจ้งผู้ใช้ก่อน
+            if (toRestore.length > 0) {
+                const names = toRestore.map(r => `• ${r.row.itemName}`).join('\n');
+                const doRestore = confirm(
+                    `พบ ${toRestore.length} รายการที่เคยแจ้งสินค้าหมดไว้:\n${names}\n\n` +
+                    `กด "ตกลง" → กู้คืนรายการเดิม + อัปเดตจำนวน (ไม่สร้างซ้ำ)\n` +
+                    `กด "ยกเลิก" → สร้างรายการใหม่ทับไปเลย`
+                );
+                if (!doRestore) {
+                    // ผู้ใช้เลือกสร้างใหม่ทั้งหมด — ย้าย toRestore ไป toCreate
+                    toCreate.push(...toRestore.map(r => r.row));
+                    toRestore.length = 0;
+                }
+            }
+
+            showLoading('กำลังส่งรายการเบิก...');
+
+            // กู้คืนรายการเดิม — อัปเดต status + qty + timestamp
+            if (toRestore.length > 0) {
+                const restoreIds = new Set(toRestore.map(r => r.existing.id));
+                const restoreMap = {};
+                toRestore.forEach(r => { restoreMap[r.existing.id] = r.row; });
+
+                state.items = state.items.map(i => {
+                    if (!restoreIds.has(i.id)) return i;
+                    const row = restoreMap[i.id];
+                    return {
+                        ...i,
+                        status: 'สั่งเบิก',
+                        requestQty: parseInt(row.qty),
+                        storageCapacity: row.parLevel ? parseInt(row.parLevel) : (i.storageCapacity || 0),
+                        oldExpiry: row.oldExpiry ? convertToCE(row.oldExpiry) : i.oldExpiry,
+                        timestamp,
+                        rawDate: now,
+                        requestedBy: currentUser || 'ไม่ทราบ',
+                        dispatchTimestamp: '',
+                        w2Note: '',
+                    };
+                });
+            }
+
+            // สร้างรายการใหม่
+            const newItems = toCreate.map(row => ({
                 id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
                 rawDate: now,
-                timestamp: timestamp,
+                timestamp,
                 itemName: row.itemName,
                 requestQty: parseInt(row.qty),
                 storageCapacity: row.parLevel ? parseInt(row.parLevel) : (row.storageCapacity ? parseInt(row.storageCapacity) : 0),
@@ -1333,8 +1513,10 @@
                 newExpiry: '', receiveQty: null, receiveNote: '', w2Note: '',
                 requestedBy: currentUser || 'ไม่ทราบ'
             }));
+            if (newItems.length > 0) {
+                state.items = [...newItems, ...state.items];
+            }
 
-            state.items = [...newItems, ...state.items];
             state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' }];
             state.w1Tab = 'pending';
             render();
@@ -1349,8 +1531,13 @@
             }
 
             hideLoading();
-            alert(`ส่งคำขอเบิกสินค้า ${newItems.length} รายการเรียบร้อยแล้ว!`);
-            sendAppLog("สั่งเบิกสินค้า Bulk (TRD)", `เบิกรวม ${newItems.length} รายการ`);
+
+            const summary = [
+                toRestore.length > 0 ? `กู้คืน ${toRestore.length} รายการ` : '',
+                newItems.length > 0  ? `สร้างใหม่ ${newItems.length} รายการ` : '',
+            ].filter(Boolean).join(' · ');
+            alert(`ส่งคำขอเบิกสินค้าเรียบร้อย!\n${summary}`);
+            sendAppLog("สั่งเบิกสินค้า Bulk (TRD)", `เบิกรวม ${validRows.length} รายการ (กู้คืน ${toRestore.length}, ใหม่ ${newItems.length})`);
         }
 
         async function cancelW1Item(id) {
@@ -2236,44 +2423,156 @@
 
         // --- Render Screens ---
         function renderHome() {
-            const missingCount = state.products.filter(p => !p.floor).length;
+            const missingCount  = state.products.filter(p => !p.floor).length;
+            const pendingW1     = state.items.filter(i => ['สั่งเบิก','กำลังจัดสินค้า'].includes(i.status)).length;
+            const totalProducts = state.products.length;
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+            const dateStr = now.toLocaleDateString('th-TH', { weekday:'long', day:'numeric', month:'long' });
+
+            // ── Desktop grid layout ──
+            const desktopCards = [
+                {
+                    onclick: "setView('w1')",
+                    icon: 'storefront',
+                    color: 'bg-brand-blue',
+                    shadow: 'shadow-brand-blue/20',
+                    title: 'W1 · TRD',
+                    subtitle: 'พนักงานหน้าร้าน',
+                    desc: 'สร้างใบเบิกสินค้า ติดตามสถานะ',
+                    badge: pendingW1 > 0 ? `<span class="inline-flex items-center gap-1 bg-amber-100 text-amber-700 text-xs font-bold px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>รอจัด ${pendingW1}</span>` : `<span class="text-xs text-slate-400">ไม่มีรายการค้าง</span>`,
+                },
+                {
+                    onclick: "setView('w2')",
+                    icon: 'warehouse',
+                    color: 'bg-brand-blue',
+                    shadow: 'shadow-brand-blue/20',
+                    title: 'W2 · AKRA',
+                    subtitle: 'พนักงานคลังสินค้า',
+                    desc: 'จัดและยืนยันการส่งสินค้า',
+                    badge: `<span class="text-xs text-slate-400">สินค้า ${totalProducts} รายการ</span>`,
+                },
+                {
+                    onclick: "setView('check_stock')",
+                    icon: 'fact_check',
+                    color: 'bg-emerald-600',
+                    shadow: 'shadow-emerald-600/20',
+                    title: 'สำรวจสต็อก',
+                    subtitle: 'Check Stock',
+                    desc: 'ตรวจนับสินค้าหน้าร้านตามโลเคชั่น',
+                    badge: `<span class="text-xs text-slate-400">รีเซ็ตทุก 18:00 น.</span>`,
+                },
+                {
+                    onclick: "setView('location')",
+                    icon: 'place',
+                    color: 'bg-indigo-600',
+                    shadow: 'shadow-indigo-600/20',
+                    title: 'จัดโลเคชั่น',
+                    subtitle: 'Location Manager',
+                    desc: 'กำหนดพิกัด W1-2F-2B ให้สินค้า',
+                    badge: missingCount > 0
+                        ? `<span class="inline-flex items-center gap-1 bg-rose-100 text-rose-600 text-xs font-bold px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 bg-rose-500 rounded-full"></span>ยังไม่มีพิกัด ${missingCount}</span>`
+                        : `<span class="inline-flex items-center gap-1 bg-emerald-100 text-emerald-700 text-xs font-bold px-2.5 py-1 rounded-full">จัดครบแล้ว</span>`,
+                },
+                {
+                    onclick: "setView('dashboard')",
+                    icon: 'bar_chart',
+                    color: 'bg-brand-orange',
+                    shadow: 'shadow-brand-orange/20',
+                    title: 'Analytics',
+                    subtitle: 'วิเคราะห์ข้อมูล',
+                    desc: 'สรุปยอด trend สำรวจสต็อก',
+                    badge: `<span class="text-xs text-slate-400">เดือนนี้ · สัปดาห์นี้</span>`,
+                },
+            ];
+
             return `
-                <div class="w-full max-w-sm flex flex-col items-center justify-center p-5 relative min-h-screen">
-                    <div class="absolute top-6 right-6 bg-white/90 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-sm border border-slate-100 flex items-center gap-1.5 text-xs font-semibold text-brand-blue z-10 tracking-wide">
-                        <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
-                        ${currentUser}
+                <div class="w-full min-h-screen">
+
+                    <!-- ── Mobile layout (hidden on desktop) ── -->
+                    <div class="md:hidden w-full max-w-sm flex flex-col items-center justify-center p-5 mx-auto relative min-h-screen">
+                        <div class="absolute top-6 right-6 bg-white/90 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-sm border border-slate-100 flex items-center gap-1.5 text-xs font-semibold text-brand-blue z-10 tracking-wide">
+                            <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
+                            ${currentUser}
+                        </div>
+                        <div class="bg-white p-10 rounded-[2.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.06)] w-full text-center border border-slate-50 mt-6">
+                            <div class="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 bg-brand-blue/10 text-brand-blue shadow-inner">
+                                <span class="material-icons-round" style="font-size: 36px;">local_shipping</span>
+                            </div>
+                            <h1 class="text-2xl font-bold text-brand-blue mb-2">ระบบเบิกจ่ายสินค้า</h1>
+                            <p class="text-slate-400 mb-8 text-xs tracking-wide">เลือกระบบที่คุณต้องการเข้าใช้งาน</p>
+                            <div class="space-y-4">
+                                <button onclick="setView('w1')" class="w-full bg-brand-blue text-white p-4 rounded-2xl font-medium flex items-center justify-center gap-3 transition-all shadow-[0_6px_20px_rgba(23,28,143,0.25)] active:scale-[0.98]"><span class="material-icons-round text-white/70">storefront</span> พนักงานหน้าร้าน (TRD)</button>
+                                <button onclick="setView('w2')" class="w-full bg-brand-blue text-white p-4 rounded-2xl font-medium flex items-center justify-center gap-3 transition-all shadow-[0_6px_20px_rgba(23,28,143,0.25)] active:scale-[0.98]"><span class="material-icons-round text-white/70">warehouse</span> พนักงานคลังสินค้า (AKRA)</button>
+                                <button onclick="setView('check_stock')" class="w-full bg-emerald-600 text-white p-4 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all shadow-[0_6px_20px_rgba(5,150,105,0.25)] active:scale-[0.98]"><span class="material-icons-round">fact_check</span> สำรวจสต๊อกหน้าร้าน</button>
+                                <button onclick="setView('location')" class="w-full bg-indigo-600 text-white p-4 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_6px_20px_rgba(99,102,241,0.25)]"><span class="material-icons-round">place</span> จัดโลเคชั่นสินค้า${missingCount > 0 ? `<span class="ml-auto bg-white/25 text-white text-xs font-bold px-2.5 py-0.5 rounded-full">${missingCount}</span>` : ''}</button>
+                                <hr class="border-slate-100 my-2">
+                                <button onclick="setView('dashboard')" class="w-full bg-brand-orange text-white p-4 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_6px_20px_rgba(227,82,5,0.25)]"><span class="material-icons-round">insights</span> วิเคราะห์ข้อมูล</button>
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="bg-white p-10 rounded-[2.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.06)] w-full text-center border border-slate-50 mt-6">
-                        <div class="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 bg-brand-blue/10 text-brand-blue shadow-inner">
-                            <span class="material-icons-round" style="font-size: 36px;">local_shipping</span>
+                    <!-- ── Desktop layout (hidden on mobile) ── -->
+                    <div class="hidden md:block w-full min-h-screen bg-slate-100">
+                        <!-- Top header bar -->
+                        <div class="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between">
+                            <div>
+                                <h1 class="text-xl font-bold text-slate-800">สวัสดี, ${currentUser} 👋</h1>
+                                <p class="text-sm text-slate-400 mt-0.5">${dateStr}</p>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <div class="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 px-3.5 py-1.5 rounded-full text-xs font-bold">
+                                    <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                                    Online · ${timeStr}
+                                </div>
+                                <div class="text-xs text-slate-400 bg-slate-100 px-3 py-1.5 rounded-full font-mono">v${CURRENT_VERSION}</div>
+                            </div>
                         </div>
-                        <h1 class="text-2xl font-bold text-brand-blue mb-2">ระบบเบิกจ่ายสินค้า</h1>
-                        <p class="text-slate-400 mb-8 text-xs tracking-wide">เลือกระบบที่คุณต้องการเข้าใช้งาน</p>
-                        
-                        <div class="space-y-4">
-                            <button onclick="setView('w1')" class="w-full bg-brand-blue hover:bg-[#121670] text-white p-4 rounded-2xl font-medium flex items-center justify-center gap-3 transition-all shadow-[0_6px_20px_rgba(23,28,143,0.25)] active:scale-[0.98]">
-                                <span class="material-icons-round text-white/70">storefront</span> พนักงานหน้าร้าน (TRD)
-                            </button>
 
-                            <button onclick="setView('w2')" class="w-full bg-brand-blue hover:bg-[#121670] text-white p-4 rounded-2xl font-medium flex items-center justify-center gap-3 transition-all shadow-[0_6px_20px_rgba(23,28,143,0.25)] active:scale-[0.98]">
-                                <span class="material-icons-round text-white/70">warehouse</span> พนักงานคลังสินค้า (AKRA)
-                            </button>
+                        <!-- Stats strip -->
+                        <div class="px-8 pt-6 pb-2 grid grid-cols-4 gap-4">
+                            ${[
+                                { label: 'รายการค้าง (W1)', value: pendingW1, icon: 'pending_actions', color: pendingW1 > 0 ? 'text-amber-600 bg-amber-50' : 'text-slate-500 bg-slate-100' },
+                                { label: 'สินค้าทั้งหมด', value: totalProducts, icon: 'inventory_2', color: 'text-brand-blue bg-blue-50' },
+                                { label: 'ยังไม่มีพิกัด', value: missingCount, icon: 'location_off', color: missingCount > 0 ? 'text-rose-600 bg-rose-50' : 'text-emerald-600 bg-emerald-50' },
+                                { label: 'พร้อมสำรวจ', value: totalProducts - missingCount, icon: 'check_circle', color: 'text-emerald-600 bg-emerald-50' },
+                            ].map(s => `
+                                <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex items-center gap-4">
+                                    <div class="w-12 h-12 rounded-xl flex items-center justify-center ${s.color}">
+                                        <span class="material-icons-round text-[22px]">${s.icon}</span>
+                                    </div>
+                                    <div>
+                                        <p class="text-2xl font-bold text-slate-800">${s.value}</p>
+                                        <p class="text-xs text-slate-400 mt-0.5">${s.label}</p>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
 
-                             <button onclick="setView('check_stock')" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white p-4 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all shadow-[0_6px_20px_rgba(5,150,105,0.25)] active:scale-[0.98]">
-                                 <span class="material-icons-round text-white">fact_check</span> สำรวจสต๊อกหน้าร้าน
-                             </button>
- 
-                             <button onclick="setView('location')" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white p-4 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_6px_20px_rgba(99,102,241,0.25)]">
-                                 <span class="material-icons-round text-white">place</span> จัดโลเคชั่นสินค้า
-                                 ${missingCount > 0 ? `<span class="ml-auto bg-white/25 text-white text-xs font-bold px-2.5 py-0.5 rounded-full">${missingCount}</span>` : ''}
-                             </button>
-
-                            <hr class="border-slate-100 my-2">
-
-                            <button onclick="setView('dashboard')" class="w-full bg-brand-orange hover:bg-[#c94804] text-white p-4 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_6px_20px_rgba(227,82,5,0.25)]">
-                                <span class="material-icons-round text-white">insights</span> วิเคราะห์ข้อมูล (Analytics)
-                            </button>
+                        <!-- Action cards grid -->
+                        <div class="px-8 py-5">
+                            <h2 class="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">เมนูหลัก</h2>
+                            <div class="grid grid-cols-3 gap-4">
+                                ${desktopCards.map(card => `
+                                    <button onclick="${card.onclick}"
+                                            class="group bg-white rounded-2xl border border-slate-200 shadow-sm p-6 text-left hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 active:scale-[0.98] flex flex-col gap-4">
+                                        <div class="flex items-start justify-between">
+                                            <div class="w-14 h-14 rounded-2xl ${card.color} shadow-lg ${card.shadow} flex items-center justify-center group-hover:scale-110 transition-transform">
+                                                <span class="material-icons-round text-white text-[26px]">${card.icon}</span>
+                                            </div>
+                                            ${card.badge}
+                                        </div>
+                                        <div>
+                                            <p class="text-[15px] font-bold text-slate-800 leading-tight">${card.title}</p>
+                                            <p class="text-xs font-medium text-slate-400 mt-0.5">${card.subtitle}</p>
+                                            <p class="text-xs text-slate-500 mt-2 leading-relaxed">${card.desc}</p>
+                                        </div>
+                                        <div class="flex items-center gap-1 text-xs font-semibold text-brand-blue opacity-0 group-hover:opacity-100 transition-opacity">
+                                            เข้าใช้งาน <span class="material-icons-round text-[14px]">arrow_forward</span>
+                                        </div>
+                                    </button>
+                                `).join('')}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2490,38 +2789,40 @@
         }
 
         function renderW2() {
-            const ACTIVE_STATUSES = ['สั่งเบิก', 'กำลังจัดสินค้า', 'สินค้าหมด'];
-            const hasTasks = state.items.some(i => ACTIVE_STATUSES.includes(i.status));
+            const PENDING_STATUSES  = ['สั่งเบิก', 'กำลังจัดสินค้า'];
+            const STOCKOUT_STATUS   = 'สินค้าหมด';
+
+            const pendingTasks  = state.items.filter(i => PENDING_STATUSES.includes(i.status));
+            const stockoutItems = state.items.filter(i => i.status === STOCKOUT_STATUS);
+            const hasPending    = pendingTasks.length > 0;
+            const hasStockout   = stockoutItems.length > 0;
+
             let content = '';
+
+            // ── Tab: งานจัด (รอจัด เท่านั้น) ──
             if (state.w2Tab === 'tasks') {
-                const activeTasks = state.items.filter(i => ACTIVE_STATUSES.includes(i.status));
-                if (activeTasks.length === 0) {
+                if (pendingTasks.length === 0) {
                     content = renderEmptyState('ไม่มีงานจัดสินค้า', 'inventory_2');
                 } else {
-                    const dispatchCount = activeTasks.filter(i => getEffectiveState(i) === 'dispatch').length;
-                    const outstockCount = activeTasks.filter(i => getEffectiveState(i) === 'outstock').length;
-                    const pendingCount  = activeTasks.filter(i => getEffectiveState(i) === 'pending').length;
+                    const dispatchCount = pendingTasks.filter(i => getEffectiveState(i) === 'dispatch').length;
+                    const pendingCount  = pendingTasks.filter(i => getEffectiveState(i) === 'pending').length;
                     content = `
                         <div class="animate-fade-in">
-                            <div class="grid grid-cols-3 border border-slate-100 rounded-2xl overflow-hidden mb-4 bg-white shadow-sm">
+                            <div class="grid grid-cols-2 border border-slate-100 rounded-2xl overflow-hidden mb-4 bg-white shadow-sm">
                                 <div class="p-3 text-center ${dispatchCount > 0 ? 'bg-emerald-50' : ''}">
                                     <p class="text-xl font-black ${dispatchCount > 0 ? 'text-emerald-600' : 'text-slate-300'}">${dispatchCount}</p>
-                                    <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">เลือกจัด</p>
+                                    <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">เลือกจัดส่ง</p>
                                 </div>
-                                <div class="p-3 text-center border-x border-slate-100 ${outstockCount > 0 ? 'bg-rose-50' : ''}">
-                                    <p class="text-xl font-black ${outstockCount > 0 ? 'text-rose-500' : 'text-slate-300'}">${outstockCount}</p>
-                                    <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">สินค้าหมด</p>
-                                </div>
-                                <div class="p-3 text-center">
+                                <div class="p-3 text-center border-l border-slate-100">
                                     <p class="text-xl font-black ${pendingCount > 0 ? 'text-brand-blue' : 'text-slate-300'}">${pendingCount}</p>
                                     <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">รอจัด</p>
                                 </div>
                             </div>
-                            <div class="space-y-2">${activeTasks.map(renderW2BatchRow).join('')}</div>
-                            <div class="h-24"></div>
+                            <div class="space-y-2">${pendingTasks.map(renderW2BatchRow).join('')}</div>
+                            <div class="h-28"></div>
                         </div>
                         <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-100 p-4 shadow-2xl z-10">
-                            <p class="text-[10px] text-center text-slate-400 mb-2">✓ จัดส่ง ${dispatchCount} · ✕ หมด ${outstockCount} · รอ ${pendingCount}</p>
+                            <p class="text-[10px] text-center text-slate-400 mb-2">✓ เลือกจัด ${dispatchCount} · รอ ${pendingCount} รายการ</p>
                             <button onclick="confirmBatchDispatch()"
                                     class="w-full py-4 rounded-2xl font-bold text-sm transition-all active:scale-[0.98]
                                            ${dispatchCount > 0 ? 'bg-brand-blue text-white shadow-lg shadow-brand-blue/20' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}">
@@ -2529,21 +2830,103 @@
                             </button>
                         </div>`;
                 }
-            } else if (state.w2Tab === 'history') { content = renderHistoryList('w2'); }
+
+            // ── Tab: สินค้าหมด ──
+            } else if (state.w2Tab === 'stockout') {
+                if (stockoutItems.length === 0) {
+                    content = renderEmptyState('ไม่มีรายการสินค้าหมด', 'check_circle');
+                } else {
+                    // check if any stockout item is being restored (in batch edits)
+                    const restoreCount = stockoutItems.filter(i => state.w2BatchEdits[i.id] === 'dispatch').length;
+                    content = `
+                        <div class="animate-fade-in">
+                            <!-- Header info -->
+                            <div class="bg-rose-50 border border-rose-200 rounded-2xl p-4 mb-4 flex items-start gap-3">
+                                <span class="material-icons-round text-rose-500 text-[22px] flex-shrink-0 mt-0.5">error_outline</span>
+                                <div>
+                                    <p class="text-sm font-bold text-rose-700">${stockoutItems.length} รายการที่แจ้งสินค้าหมด</p>
+                                    <p class="text-xs text-rose-500 mt-0.5">กด "กู้คืน" เพื่อจัดส่งใหม่ หรือ "ล้างทั้งหมด" เพื่อย้ายไปประวัติ</p>
+                                </div>
+                            </div>
+                            <!-- Stockout rows -->
+                            <div class="space-y-2">
+                                ${stockoutItems.map(item => {
+                                    const isRestoring = state.w2BatchEdits[item.id] === 'dispatch';
+                                    return `
+                                    <div class="bg-white rounded-2xl border ${isRestoring ? 'border-emerald-300 shadow-emerald-100 shadow-md' : 'border-rose-200/60'} p-4 flex items-center gap-3 transition-all">
+                                        <div class="flex-1 min-w-0">
+                                            <p class="font-bold text-slate-800 text-sm truncate">${item.itemName || '—'}</p>
+                                            <div class="flex items-center gap-2 mt-1 flex-wrap">
+                                                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${isRestoring ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600'}">
+                                                    ${isRestoring ? '✓ กำลังกู้คืน' : '❌ หมด'}
+                                                </span>
+                                                <span class="text-[10px] text-slate-400">${item.qty || '—'} ${item.unit || ''}</span>
+                                                ${item.dispatchTimestamp ? `<span class="text-[10px] text-slate-400">${item.dispatchTimestamp}</span>` : ''}
+                                            </div>
+                                        </div>
+                                        <button onclick="${isRestoring ? `delete state.w2BatchEdits['${item.id}']; render()` : `restoreStockoutItem('${item.id}')`}"
+                                                class="flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95
+                                                       ${isRestoring ? 'bg-slate-100 text-slate-500' : 'bg-emerald-600 text-white shadow-sm shadow-emerald-200'}">
+                                            ${isRestoring ? 'ยกเลิก' : '🔄 กู้คืน'}
+                                        </button>
+                                    </div>`;
+                                }).join('')}
+                            </div>
+                            <div class="h-32"></div>
+                        </div>
+                        <!-- Bottom action bar -->
+                        <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-100 p-4 shadow-2xl z-10 space-y-2">
+                            ${restoreCount > 0 ? `
+                            <button onclick="confirmBatchDispatch()"
+                                    class="w-full py-3.5 rounded-2xl font-bold text-sm bg-brand-blue text-white shadow-lg shadow-brand-blue/20 active:scale-[0.98] transition-all">
+                                🚚 ยืนยันกู้คืน + จัดส่ง ${restoreCount} รายการ
+                            </button>` : ''}
+                            <button onclick="clearAllStockout()"
+                                    class="w-full py-3.5 rounded-2xl font-bold text-sm bg-rose-50 text-rose-600 border border-rose-200 active:scale-[0.98] transition-all">
+                                🗑 ล้างรายการหมดทั้งหมด (ย้ายไปประวัติ)
+                            </button>
+                        </div>`;
+                }
+
+            // ── Tab: ประวัติ ──
+            } else if (state.w2Tab === 'history') {
+                content = renderHistoryList('w2');
+            }
 
             return `
                 <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative">
                     <header class="bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
-                        <div class="flex items-center gap-2"><button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button><h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">warehouse</span> คลังสินค้า (AKRA)</h1></div>
+                        <div class="flex items-center gap-2">
+                            <button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button>
+                            <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">warehouse</span> คลังสินค้า (AKRA)</h1>
+                        </div>
                         <div class="flex items-center gap-2">
                             <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white" title="รีเฟรชข้อมูล"><span class="material-icons-round text-[20px]">refresh</span></button>
                             <div class="text-[10px] font-semibold tracking-wide bg-black/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-white/10"><span class="material-icons-round text-[14px]">account_circle</span> ${currentUser || 'Demo'}</div>
                         </div>
                     </header>
-                    <div class="flex bg-white shadow-sm sticky top-[60px] z-10 border-b border-slate-100 px-2">
-                        <button onclick="setW2Tab('tasks')" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] relative transition-all ${state.w2Tab === 'tasks' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400 hover:text-slate-600'}">งานจัด ${hasTasks ? `<span class="absolute top-3.5 right-4 w-1.5 h-1.5 rounded-full bg-brand-orange ring-2 ring-white"></span>` : ''}</button>
-                        <button onclick="setW2Tab('history')" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] transition-all ${state.w2Tab === 'history' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400 hover:text-slate-600'}">ประวัติ</button>
+
+                    <!-- 3 tabs -->
+                    <div class="flex bg-white shadow-sm sticky top-[60px] z-10 border-b border-slate-100">
+                        <button onclick="setW2Tab('tasks')"
+                                class="flex-1 py-3 text-[12px] font-semibold border-b-[2.5px] relative transition-all
+                                       ${state.w2Tab === 'tasks' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400 hover:text-slate-600'}">
+                            รอจัด
+                            ${hasPending ? `<span class="ml-1 bg-brand-blue/10 text-brand-blue text-[10px] font-bold px-1.5 py-0.5 rounded-full">${pendingTasks.length}</span>` : ''}
+                        </button>
+                        <button onclick="setW2Tab('stockout')"
+                                class="flex-1 py-3 text-[12px] font-semibold border-b-[2.5px] relative transition-all
+                                       ${state.w2Tab === 'stockout' ? 'border-rose-500 text-rose-600' : 'border-transparent text-slate-400 hover:text-slate-600'}">
+                            สินค้าหมด
+                            ${hasStockout ? `<span class="ml-1 bg-rose-100 text-rose-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full">${stockoutItems.length}</span>` : ''}
+                        </button>
+                        <button onclick="setW2Tab('history')"
+                                class="flex-1 py-3 text-[12px] font-semibold border-b-[2.5px] transition-all
+                                       ${state.w2Tab === 'history' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400 hover:text-slate-600'}">
+                            ประวัติ
+                        </button>
                     </div>
+
                     <main class="flex-1 overflow-y-auto p-5 pb-24">${content}</main>
                 </div>`;
         }
@@ -2553,43 +2936,59 @@
             if (!state.locationSheet) return '';
             const { name } = state.locationSheet;
             const floor = state.locationSheetFloor;
-            const zone  = state.locationSheetZoneInput || '';
-            const par   = state.locationSheetParLevel  || '';
+            const bin   = (state.locationSheetZoneInput || '').toUpperCase().trim();
+            const par   = state.locationSheetParLevel || '';
             const FLOORS = ['1','2','3','4','5'];
 
             const isBulk = name === 'BULK_MODE';
             const selectedCount = isBulk ? Object.keys(state.locationSelectedItems).length : 0;
-            const displayTitle = isBulk ? `จัดพิกัดสินค้าแบบกลุ่ม (${selectedCount} รายการ)` : name;
+            const displayTitle = isBulk ? `จัดพิกัดแบบกลุ่ม (${selectedCount} รายการ)` : name;
 
-            let existingZones = [];
+            const locationCode = floor && floor !== 'NOSTK' && bin
+                ? `W1-${floor}F-${bin}`
+                : (floor === 'NOSTK' ? 'NOSTK' : null);
+
+            let existingBins = [];
             if (floor && floor !== 'NOSTK') {
-                const zSet = new Set();
-                state.products.filter(p => p.floor === floor && p.location)
-                    .forEach(p => { const z = extractZone(p.location); if (z) zSet.add(z); });
-                existingZones = [...zSet].sort();
+                const bSet = new Set();
+                state.products.filter(p => p.floor === floor && p.location && p.location !== 'NOSTK')
+                    .forEach(p => { if (p.location) bSet.add(p.location); });
+                existingBins = [...bSet].sort();
             }
 
-            const canSave = !!(floor && (floor === 'NOSTK' || zone.trim()));
-            const saveLbl = floor
-                ? (floor === 'NOSTK' ? ' (NOSTK)' : (zone ? ` ชั้น ${floor} › ${zone}` : ''))
-                : '';
+            const canSave = !!(floor && (floor === 'NOSTK' || bin));
+            const stepNum = (n) => `<span class="w-5 h-5 rounded-full bg-brand-blue text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">${n}</span>`;
 
             return `
-                <div onclick="closeLocationSheet()" class="fixed inset-0 bg-black/40 z-40"></div>
-                <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white rounded-t-[2rem] z-50 shadow-2xl animate-slide-up" style="max-height:90vh;overflow-y:auto">
-                    <div class="flex items-center justify-between p-4 border-b border-slate-100">
+                <div onclick="closeLocationSheet()" class="fixed inset-0 bg-black/50 z-40 backdrop-blur-sm"></div>
+                <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white rounded-t-[2rem] z-50 shadow-2xl animate-slide-up" style="max-height:92vh;overflow-y:auto">
+
+                    <div class="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100">
                         <div>
-                            <p class="text-[11px] font-semibold text-slate-400">${isBulk ? 'จัดพิกัดกลุ่ม' : 'กำหนดโลเคชั่น'}</p>
-                            <p class="text-sm font-bold text-brand-blue truncate" style="max-width:260px">${displayTitle}</p>
+                            <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">${isBulk ? 'จัดพิกัดกลุ่ม' : 'กำหนดตำแหน่งสินค้า'}</p>
+                            <p class="text-sm font-bold text-brand-blue truncate mt-0.5" style="max-width:240px">${displayTitle}</p>
                         </div>
-                        <button onclick="closeLocationSheet()" class="p-2 rounded-full hover:bg-slate-100 transition-colors">
-                            <span class="material-icons-round text-slate-400">close</span>
+                        <button onclick="closeLocationSheet()" class="p-2 rounded-full bg-slate-100 hover:bg-slate-200 transition-colors">
+                            <span class="material-icons-round text-slate-500 text-[20px]">close</span>
                         </button>
                     </div>
 
-                    <div class="p-4 space-y-5 pb-8">
+                    <!-- Location code preview -->
+                    <div id="ls-banner" class="mx-5 mt-4 px-4 py-3 rounded-2xl flex items-center gap-3 ${locationCode ? 'bg-blue-50 border border-brand-blue/25' : 'bg-slate-50 border border-slate-200'}">
+                        <span class="ls-banner-icon material-icons-round text-[22px] ${locationCode ? 'text-brand-blue' : 'text-slate-400'}">place</span>
                         <div>
-                            <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">เลือกชั้น</p>
+                            <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">ตำแหน่งสินค้า</p>
+                            <p id="ls-code-preview" class="text-base font-bold tracking-wider ${locationCode ? 'text-brand-blue' : 'text-slate-400'}">${locationCode || 'ยังไม่ได้กำหนด'}</p>
+                        </div>
+                    </div>
+
+                    <div class="p-5 space-y-5 pb-8">
+
+                        <!-- Step 1: Floor -->
+                        <div>
+                            <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                                ${stepNum(1)} เลือกชั้น
+                            </p>
                             <div class="grid grid-cols-3 gap-2">
                                 ${FLOORS.map(f => `
                                     <button onclick="setSheetFloor('${f}')"
@@ -2600,44 +2999,58 @@
                                 `).join('')}
                                 <button onclick="setSheetFloor('NOSTK')"
                                         class="py-3 rounded-2xl text-sm font-bold transition-all active:scale-95
-                                               ${floor === 'NOSTK' ? 'bg-slate-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">
+                                               ${floor === 'NOSTK' ? 'bg-slate-700 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">
                                     ❌ NOSTK
                                 </button>
                             </div>
                         </div>
 
                         ${floor && floor !== 'NOSTK' ? `
+                        <!-- Step 2: Bin -->
                         <div>
-                            <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">เลือกโซน</p>
-                            ${existingZones.length > 0 ? `
-                            <div class="flex flex-wrap gap-2 mb-3">
-                                ${existingZones.map(z => `
-                                    <button onclick="state.locationSheetZoneInput='${z}'; render()"
-                                            class="px-3 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95
-                                                   ${zone === z ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'}">
-                                        ${z}
-                                    </button>
-                                `).join('')}
-                            </div>` : ''}
-                            <input type="text" value="${zone}"
-                                placeholder="พิมพ์ชื่อโซน เช่น 1B, 2A-03..."
-                                oninput="state.locationSheetZoneInput=this.value.toUpperCase(); render()"
-                                class="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold uppercase focus:border-indigo-500 focus:bg-white transition-all"
+                            <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                                ${stepNum(2)} ระบุ Bin
+                                <span class="font-normal normal-case text-slate-400">(เช่น 1A, 2B, 3E)</span>
+                            </p>
+                            <input id="ls-bin-input" type="text" value="${bin}"
+                                placeholder="พิมพ์รหัส Bin..."
+                                oninput="updateSheetBin(this.value)"
+                                class="w-full p-3.5 rounded-2xl text-sm font-bold uppercase text-center tracking-widest transition-all
+                                       ${bin ? 'bg-blue-50 border-2 border-brand-blue' : 'bg-slate-50 border-2 border-slate-200'}"
                                 autocomplete="off">
+                            ${existingBins.length > 0 ? `
+                            <div class="mt-3">
+                                <p class="text-[10px] font-semibold text-slate-400 mb-2">Bin ที่มีในชั้น ${floor} แล้ว:</p>
+                                <div class="flex flex-wrap gap-1.5">
+                                    ${existingBins.map(b => `
+                                        <button onclick="updateSheetBin('${b}')"
+                                                class="px-3 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-95
+                                                       ${bin === b ? 'bg-brand-blue text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'}">
+                                            ${b}
+                                        </button>
+                                    `).join('')}
+                                </div>
+                            </div>` : `<p class="text-[11px] text-slate-400 mt-2 text-center">ยังไม่มี Bin ในชั้น ${floor} — สร้างใหม่ได้เลย</p>`}
                         </div>` : ''}
 
+                        <!-- Step 3: Par Level -->
+                        ${floor ? `
                         <div>
-                            <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Par Level <span class="font-normal normal-case text-slate-400">${isBulk ? '(ไม่บังคับ - ปล่อยว่างเพื่อไม่เปลี่ยน)' : '(ไม่บังคับ)'}</span></p>
+                            <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                                ${stepNum(floor !== 'NOSTK' ? 3 : 2)} Par Level
+                                <span class="font-normal normal-case text-slate-400">${isBulk ? '(ปล่อยว่างเพื่อคงค่าเดิม)' : '(ไม่บังคับ)'}</span>
+                            </p>
                             <input type="number" min="0" value="${par}"
-                                placeholder="${isBulk ? 'ปล่อยว่างไว้เพื่อคงค่า Par เดิมของแต่ละสินค้า' : 'ยอดสต๊อกเต็ม'}"
+                                placeholder="${isBulk ? 'คงค่า Par เดิมของแต่ละสินค้า' : 'ยอดสต๊อกเต็ม (ลัง)'}"
                                 oninput="state.locationSheetParLevel=this.value"
                                 class="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-center focus:border-brand-orange focus:bg-white transition-all">
-                        </div>
+                        </div>` : ''}
 
-                        <button onclick="${canSave ? 'confirmLocationSheet()' : ''}"
+                        <button id="ls-save-btn"
+                                onclick="${canSave ? 'confirmLocationSheet()' : ''}"
                                 class="w-full py-4 rounded-2xl font-bold text-base transition-all active:scale-[0.98]
                                        ${canSave ? 'bg-brand-blue text-white shadow-lg shadow-brand-blue/20' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}">
-                            ✓ บันทึก${saveLbl}
+                            ${canSave ? `✓ บันทึก ${locationCode}` : 'เลือกชั้นและระบุ Bin ก่อน'}
                         </button>
                     </div>
                 </div>
@@ -2649,13 +3062,12 @@
             const enc = encodeURIComponent(prod.name);
             const borderClass = isMissing ? 'border-rose-200' : 'border-slate-100';
 
+            const locCode = displayLocationCode(prod);
             let locationChip = '';
             if (prod.floor === 'NOSTK') {
                 locationChip = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">❌ NOSTK</span>`;
-            } else if (prod.floor && prod.location) {
-                locationChip = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">📍 ชั้น ${prod.floor} › ${prod.location}</span>`;
-            } else if (prod.floor) {
-                locationChip = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200">📍 ชั้น ${prod.floor}</span>`;
+            } else if (locCode) {
+                locationChip = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-brand-blue border border-brand-blue/25 tracking-wide">📍 ${locCode}</span>`;
             } else {
                 locationChip = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-500 border border-rose-200">🔴 ยังไม่มีโลเคชั่น</span>`;
             }
@@ -2720,19 +3132,20 @@
         function renderLocationListHTML() {
             const floorF = state.locationFloorFilter;
             const zoneF  = state.locationZoneFilter;
+            const binF   = state.locationBinFilter;
             const search = (state.locationSearch || '').toLowerCase().trim();
 
             let displayList = [];
             if (floorF === '') {
                 displayList = state.products.filter(p => !p.floor);
-            } else {
-                if (floorF === 'NOSTK') {
-                    displayList = state.products.filter(p => p.floor === 'NOSTK');
-                } else if (floorF && zoneF) {
-                    displayList = state.products.filter(p => p.floor === floorF && extractZone(p.location) === zoneF);
-                } else if (floorF) {
-                    displayList = state.products.filter(p => p.floor === floorF);
-                }
+            } else if (floorF === 'NOSTK') {
+                displayList = state.products.filter(p => p.floor === 'NOSTK');
+            } else if (floorF && zoneF && binF) {
+                displayList = state.products.filter(p => p.floor === floorF && extractZone(p.location) === zoneF && p.location === binF);
+            } else if (floorF && zoneF) {
+                displayList = state.products.filter(p => p.floor === floorF && extractZone(p.location) === zoneF);
+            } else if (floorF) {
+                displayList = state.products.filter(p => p.floor === floorF);
             }
 
             if (search) {
@@ -2744,7 +3157,8 @@
 
             const emptyMsg = search ? 'ไม่พบสินค้าที่ค้นหา'
                 : floorF === 'NOSTK' ? 'ยังไม่มีสินค้ากลุ่มนี้'
-                : floorF && zoneF ? `ยังไม่มีสินค้าในโซน ${zoneF}`
+                : binF ? `ยังไม่มีสินค้าใน Bin ${binF}`
+                : zoneF ? `ยังไม่มีสินค้าในโซน ${zoneF}`
                 : floorF ? `ยังไม่มีสินค้าในชั้น ${floorF}`
                 : 'สินค้าทุกรายการมีโลเคชั่นแล้ว 🎉';
 
@@ -2787,22 +3201,35 @@
         function renderLocationManager() {
             const floorF  = state.locationFloorFilter;
             const zoneF   = state.locationZoneFilter;
-            const search  = (state.locationSearch || '').toLowerCase().trim();
+            const binF    = state.locationBinFilter;
             const FLOORS  = ['1','2','3','4','5'];
 
-            const missingCount = state.products.filter(p => !p.floor).length;
+            const missingCount  = state.products.filter(p => !p.floor).length;
             const assignedCount = state.products.filter(p => p.floor).length;
 
+            // Zones = unique digit-prefix of location for this floor
             let zones = [];
             if (floorF && floorF !== 'NOSTK') {
                 const zSet = new Set();
-                state.products.filter(p => p.floor === floorF && p.location)
+                state.products.filter(p => p.floor === floorF && p.location && p.location !== 'NOSTK')
                     .forEach(p => { const z = extractZone(p.location); if (z) zSet.add(z); });
-                // ดึงโซนชั่วคราวเข้ามาแสดงด้วย
-                if (state.tempZones) {
-                    state.tempZones.forEach(z => zSet.add(z));
-                }
-                zones = [...zSet].sort();
+                zones = [...zSet].sort((a, b) => Number(a) - Number(b) || a.localeCompare(b));
+            }
+
+            // Bins within selected zone
+            let binsInZone = [];
+            if (floorF && zoneF) {
+                const bSet = new Set();
+                state.products.filter(p => p.floor === floorF && extractZone(p.location) === zoneF)
+                    .forEach(p => { if (p.location) bSet.add(p.location); });
+                binsInZone = [...bSet].sort();
+            }
+
+            // Breadcrumb for header
+            let breadcrumb = '';
+            if (floorF && floorF !== '') {
+                breadcrumb = floorF === 'NOSTK' ? 'NOSTK'
+                    : `W1-${floorF}F${zoneF ? ' › โซน ' + zoneF : ''}${binF ? ' › ' + binF : ''}`;
             }
 
             return `
@@ -2816,7 +3243,7 @@
                                 <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5">
                                     <span class="material-icons-round text-[20px]">place</span> จัดโลเคชั่นสินค้า
                                 </h1>
-                                ${floorF || zoneF ? `<p class="text-[11px] text-white/70 mt-0.5">${floorF ? (floorF === 'NOSTK' ? 'ไม่มีพื้นที่จัด' : 'ชั้น ' + floorF) : ''}${zoneF ? ' › โซน ' + zoneF : ''}</p>` : ''}
+                                ${breadcrumb ? `<p class="text-[11px] text-white/70 mt-0.5 tracking-wide">${breadcrumb}</p>` : ''}
                             </div>
                         </div>
                         <div class="flex items-center gap-1">
@@ -2830,41 +3257,50 @@
                         </div>
                     </header>
 
-                    <!-- แท็บหลักแบ่งแยกชัดเจนตามคำแนะนำผู้ใช้งาน -->
+                    <!-- Main tabs -->
                     <div class="bg-white border-b border-slate-100 flex sticky top-[57px] z-10 shadow-sm">
-                        <button onclick="setLocationTab('missing')" 
-                                class="flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all 
+                        <button onclick="setLocationTab('missing')"
+                                class="flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all
                                        ${floorF === '' ? 'border-rose-500 text-rose-600' : 'border-transparent text-slate-500'}">
                             ยังไม่มีโลเคชั่น ${missingCount > 0 ? `<span class="ml-1 bg-rose-100 text-rose-600 text-[10px] px-1.5 py-0.5 rounded-full font-bold">${missingCount}</span>` : ''}
                         </button>
-                        <button onclick="setLocationTab('assigned')" 
-                                class="flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all 
+                        <button onclick="setLocationTab('assigned')"
+                                class="flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all
                                        ${floorF !== '' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-500'}">
                             จัดแล้ว ${assignedCount > 0 ? `<span class="ml-1 bg-slate-100 text-slate-600 text-[10px] px-1.5 py-0.5 rounded-full font-bold">${assignedCount}</span>` : ''}
                         </button>
                     </div>
 
-                    <!-- ฟิลเตอร์ตัวเลือกชั้น (แสดงเฉพาะแท็บ "จัดแล้ว") -->
+                    <!-- Floor filter (tab "จัดแล้ว" only) -->
                     ${floorF !== '' ? `
                     <div class="bg-white border-b border-slate-100 px-3 py-2.5 overflow-x-auto flex gap-2 shadow-sm">
                         ${FLOORS.map(f => {
                             const cnt = state.products.filter(p => p.floor === f).length;
-                            return `<button onclick="setLocationFloor('${f}')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${floorF === f ? 'bg-brand-blue text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500'}">ชั้น ${f}${cnt > 0 ? ` <span class="text-[10px] opacity-70">(${cnt})</span>` : ''}</button>`;
+                            return `<button onclick="setLocationFloor('${f}')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${floorF === f ? 'bg-brand-blue text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500'}">ชั้น ${f}${cnt > 0 ? ` (${cnt})` : ''}</button>`;
                         }).join('')}
                         <button onclick="setLocationFloor('NOSTK')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${floorF === 'NOSTK' ? 'bg-slate-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500'}">❌ NOSTK</button>
                     </div>` : ''}
 
-                    <!-- ตัวเลือกโซนพร้อมปุ่มเพิ่มโซนใหม่ -->
+                    <!-- Zone filter (digit prefix) -->
                     ${floorF && floorF !== 'NOSTK' ? `
                     <div class="bg-white border-b border-slate-100 px-3 py-2 overflow-x-auto flex gap-2 shadow-sm">
-                        <button onclick="setLocationZone('')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${!zoneF ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500'}">ทุกโซน</button>
+                        <span class="flex-shrink-0 text-[10px] font-bold text-slate-400 uppercase self-center pr-1">โซน</span>
+                        <button onclick="setLocationZone('')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${!zoneF ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500'}">ทั้งหมด</button>
                         ${zones.map(z => {
                             const cnt = state.products.filter(p => p.floor === floorF && extractZone(p.location) === z).length;
-                            return `<button onclick="setLocationZone('${z}')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${zoneF === z ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500'}">โซน ${z} (${cnt})</button>`;
+                            return `<button onclick="setLocationZone('${z}')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${zoneF === z ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-500'}">โซน ${z} <span class="opacity-70">(${cnt})</span></button>`;
                         }).join('')}
-                        <button onclick="openAddZoneDialog()" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 flex items-center gap-1 active:scale-95 transition-all">
-                            <span class="material-icons-round text-[12px]">add</span> โซนใหม่
-                        </button>
+                    </div>` : ''}
+
+                    <!-- Bin filter (within zone — drill-down level 2) -->
+                    ${floorF && zoneF && binsInZone.length > 1 ? `
+                    <div class="bg-indigo-50/60 border-b border-indigo-100 px-3 py-2 overflow-x-auto flex gap-2">
+                        <span class="flex-shrink-0 text-[10px] font-bold text-indigo-400 uppercase self-center pr-1">Bin</span>
+                        <button onclick="setLocationBin('')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all ${!binF ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-indigo-200 text-indigo-600'}">ทั้งหมด</button>
+                        ${binsInZone.map(b => {
+                            const cnt = state.products.filter(p => p.floor === floorF && p.location === b).length;
+                            return `<button onclick="setLocationBin('${b}')" class="flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold tracking-wider transition-all ${binF === b ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-indigo-200 text-indigo-600'}">${b} <span class="opacity-70">(${cnt})</span></button>`;
+                        }).join('')}
                     </div>` : ''}
 
                     ${floorF === 'NOSTK' ? `
@@ -2878,22 +3314,20 @@
                             class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:border-brand-blue focus:bg-white transition-all">
                     </div>
 
-                    <!-- ปุ่มเพิ่มสินค้าเข้าโซนเมื่อเจาะจงโซนแล้ว -->
+                    <!-- Add products to bin button -->
                     ${floorF && zoneF && floorF !== 'NOSTK' ? `
-                    <div class="px-3 py-2 bg-white border-b border-slate-100 flex justify-center">
-                        <button onclick="openZonePopupAdd()" 
+                    <div class="px-3 py-2 bg-white border-b border-slate-100">
+                        <button onclick="openZonePopupAdd()"
                                 class="w-full py-2.5 bg-indigo-600 text-white rounded-2xl text-xs font-bold shadow-md shadow-indigo-100 flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all">
                             <span class="material-icons-round text-[18px]">add_circle</span>
-                            เพิ่มสินค้าในโซน ${zoneF}
+                            เพิ่มสินค้าเข้าโซน ${zoneF}${binF ? ' › ' + binF : ''}
                         </button>
                     </div>` : ''}
 
-                    <!-- รายการสินค้า ค่อยดึงแบบ Dynamic โหลดเร็วแบบ Lazy Load -->
                     <main id="location-list" class="flex-1 overflow-y-auto p-4 pb-16">
                         ${renderLocationListHTML()}
                     </main>
 
-                    <!-- สำหรับส่วนควบคุมการสั่งการกลุ่มลอยล่างจอ -->
                     <div id="bulk-action-bar">
                         ${state.locationBulkMode ? setTimeout(updateBulkActionBar, 50) && '' : ''}
                     </div>
@@ -3428,15 +3862,154 @@
             }
         }
 
+        // ── Desktop Sidebar ──
+        // อัปเดต bin input โดยตรง — ไม่ render() ทั้งหน้า
+        function updateSheetBin(val) {
+            const bin = val.toUpperCase();
+            state.locationSheetZoneInput = bin;
+            const floor = state.locationSheetFloor;
+            const code = (floor && floor !== 'NOSTK' && bin) ? `W1-${floor}F-${bin}` : null;
+            const canSave = !!(floor && (floor === 'NOSTK' || bin));
+
+            // input: uppercase + border color
+            const inp = document.getElementById('ls-bin-input');
+            if (inp && inp !== document.activeElement) inp.value = bin;
+            if (inp) {
+                inp.className = `w-full p-3.5 rounded-2xl text-sm font-bold uppercase text-center tracking-widest transition-all ${bin ? 'bg-blue-50 border-2 border-brand-blue' : 'bg-slate-50 border-2 border-slate-200'}`;
+            }
+
+            // preview code
+            const prev = document.getElementById('ls-code-preview');
+            if (prev) {
+                prev.textContent = code || 'ยังไม่ได้กำหนด';
+                prev.className = `text-base font-bold tracking-wider ${code ? 'text-brand-blue' : 'text-slate-400'}`;
+            }
+
+            // preview banner wrapper
+            const banner = document.getElementById('ls-banner');
+            if (banner) {
+                banner.className = `mx-5 mt-4 px-4 py-3 rounded-2xl flex items-center gap-3 ${code ? 'bg-blue-50 border border-brand-blue/25' : 'bg-slate-50 border border-slate-200'}`;
+                const icon = banner.querySelector('.ls-banner-icon');
+                if (icon) icon.className = `ls-banner-icon material-icons-round text-[22px] ${code ? 'text-brand-blue' : 'text-slate-400'}`;
+            }
+
+            // save button
+            const btn = document.getElementById('ls-save-btn');
+            if (btn) {
+                btn.textContent = canSave ? `✓ บันทึก ${code || 'NOSTK'}` : 'เลือกชั้นและระบุ Bin ก่อน';
+                btn.onclick = canSave ? confirmLocationSheet : null;
+                btn.className = `w-full py-4 rounded-2xl font-bold text-base transition-all active:scale-[0.98] ${canSave ? 'bg-brand-blue text-white shadow-lg shadow-brand-blue/20' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`;
+            }
+        }
+
+        function toggleSidebar() {
+            state.sidebarCollapsed = !state.sidebarCollapsed;
+            const el = document.getElementById('sidebar');
+            if (el) el.className = state.sidebarCollapsed ? 'collapsed' : '';
+            // re-render sidebar content for icon-only vs full mode
+            const sInner = document.getElementById('sidebar');
+            if (sInner) sInner.innerHTML = renderSidebar();
+            // re-apply class after innerHTML overwrite
+            if (sInner) sInner.className = state.sidebarCollapsed ? 'collapsed' : '';
+        }
+
+        function goToPortal() {
+            window.location.href = SSO_CONFIG.PORTAL_URL;
+        }
+
+        function renderSidebar() {
+            const user = window.appSession;
+            const col  = state.sidebarCollapsed;
+            const navItems = [
+                { view: 'home',        icon: 'home',           label: 'หน้าหลัก',    sub: 'Dashboard' },
+                { view: 'w1',          icon: 'shopping_cart',  label: 'เบิกสินค้า',  sub: 'W1 · TRD' },
+                { view: 'w2',          icon: 'local_shipping', label: 'จัดส่งสินค้า', sub: 'W2 · AKRA' },
+                { view: 'dashboard',   icon: 'bar_chart',      label: 'Analytics',   sub: 'รายงาน' },
+                { view: 'location',    icon: 'place',          label: 'จัดโลเคชั่น', sub: 'Location' },
+                { view: 'check_stock', icon: 'inventory_2',    label: 'ตรวจสต็อก',  sub: 'Check Stock' },
+            ];
+            return `
+                <!-- Header: Logo + Hamburger -->
+                <div class="flex items-center ${col ? 'justify-center px-2 pt-4 pb-3' : 'justify-between px-4 pt-5 pb-4'}">
+                    ${!col ? `
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:rgba(227,82,5,0.9)">
+                            <span class="material-icons-round text-white text-[20px]">warehouse</span>
+                        </div>
+                        <div class="sidebar-logo-text">
+                            <p class="font-bold text-white text-[14px] leading-tight tracking-wide">TRD · AKRA</p>
+                            <p class="text-[10px] text-white/35 font-mono">v${CURRENT_VERSION}</p>
+                        </div>
+                    </div>` : ''}
+                    <button onclick="toggleSidebar()"
+                            title="${col ? 'ขยายเมนู' : 'ย่อเมนู'}"
+                            class="w-8 h-8 rounded-xl flex items-center justify-center text-white/50 hover:bg-white/12 hover:text-white transition-all active:scale-95 flex-shrink-0">
+                        <span class="material-icons-round text-[20px]">${col ? 'menu' : 'menu_open'}</span>
+                    </button>
+                </div>
+
+                <!-- Nav items -->
+                <nav class="flex-1 ${col ? 'px-2' : 'px-3'} space-y-0.5 pt-1">
+                    ${navItems.map(item => {
+                        const active = state.view === item.view;
+                        return `
+                        <button onclick="setView('${item.view}')"
+                                title="${item.label}"
+                                class="sidebar-nav-btn w-full flex items-center gap-3 ${col ? 'px-0 py-3' : 'px-3.5 py-3'} rounded-2xl transition-all text-left group
+                                       ${active ? 'bg-white/18' : 'hover:bg-white/8'}">
+                            <span class="material-icons-round text-[21px] flex-shrink-0 transition-colors
+                                         ${active ? 'text-white' : 'text-white/40 group-hover:text-white/75'}">${item.icon}</span>
+                            <div class="min-w-0 sidebar-label">
+                                <p class="text-[13px] font-semibold leading-tight truncate ${active ? 'text-white' : 'text-white/60 group-hover:text-white/90'}">${item.label}</p>
+                                <p class="sidebar-sublabel text-[10px] ${active ? 'text-white/45' : 'text-white/28'}">${item.sub}</p>
+                            </div>
+                            <div class="sidebar-active-dot ml-auto w-1.5 h-1.5 rounded-full bg-white/60 flex-shrink-0 ${active ? '' : 'opacity-0'}"></div>
+                        </button>`;
+                    }).join('')}
+                </nav>
+
+                <!-- Bottom: User + Portal button -->
+                <div class="${col ? 'px-2 pb-4 pt-3' : 'px-3 pb-4 pt-3'} space-y-2 border-t border-white/8 mt-2">
+                    <!-- Back to Main Portal -->
+                    <button onclick="goToPortal()"
+                            title="กลับหน้าหลัก"
+                            class="w-full flex items-center ${col ? 'justify-center gap-0 px-0' : 'gap-3 px-3.5'} py-2.5 rounded-2xl transition-all hover:bg-white/8 group active:scale-[0.97]">
+                        <span class="material-icons-round text-[20px] flex-shrink-0 text-white/40 group-hover:text-white/80 transition-colors">logout</span>
+                        <span class="sidebar-label text-[12px] font-semibold text-white/45 group-hover:text-white/80 transition-colors">กลับ Main Portal</span>
+                    </button>
+
+                    <!-- User chip -->
+                    ${user ? `
+                    <div class="flex items-center ${col ? 'justify-center' : 'gap-2.5 px-1'} py-1">
+                        <div class="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style="background:rgba(255,255,255,0.1)">
+                            <span class="material-icons-round text-white/55 text-[16px]">person</span>
+                        </div>
+                        <div class="sidebar-user-detail min-w-0">
+                            <p class="text-[12px] font-bold text-white/80 truncate">${user.name || user.id || '—'}</p>
+                            <p class="text-[10px] text-white/35">${(user.roles || []).slice(0,2).join(' · ')}</p>
+                        </div>
+                    </div>` : `<p class="text-[10px] text-white/25 text-center py-1">Demo</p>`}
+                </div>
+            `;
+        }
+
         // Main Render Function
         function render() {
-            const root = document.getElementById('app-root');
-            if (state.view === 'home')      { root.innerHTML = renderHome(); }
-            else if (state.view === 'w1')   { root.innerHTML = renderW1(); }
-            else if (state.view === 'w2')   { root.innerHTML = renderW2(); }
-            else if (state.view === 'dashboard') { root.innerHTML = renderDashboard(); }
-            else if (state.view === 'location')  { root.innerHTML = renderLocationManager(); }
-            else if (state.view === 'check_stock') { root.innerHTML = renderCheckStock(); }
+            const sidebar  = document.getElementById('sidebar');
+            const mainView = document.getElementById('main-view');
+
+            if (sidebar) {
+                sidebar.innerHTML = renderSidebar();
+                sidebar.className = state.sidebarCollapsed ? 'collapsed' : '';
+            }
+
+            const target = mainView || document.getElementById('app-root');
+            if (state.view === 'home')           { target.innerHTML = renderHome(); }
+            else if (state.view === 'w1')        { target.innerHTML = renderW1(); }
+            else if (state.view === 'w2')        { target.innerHTML = renderW2(); }
+            else if (state.view === 'dashboard') { target.innerHTML = renderDashboard(); }
+            else if (state.view === 'location')  { target.innerHTML = renderLocationManager(); }
+            else if (state.view === 'check_stock') { target.innerHTML = renderCheckStock(); }
         }
 
         // ==========================================
