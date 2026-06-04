@@ -2621,7 +2621,7 @@
                                                     class="w-full p-3 bg-white border border-slate-200 rounded-xl focus:border-brand-blue text-sm font-bold" placeholder="0">
                                             </div>
                                             <div>
-                                                <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">Par Level ${row.unit ? `(${row.unit})` : ''}</label>
+                                                <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">จำนวนที่จัดเก็บได้ ${row.unit ? `(${row.unit})` : ''}</label>
                                                 <input type="number" value="${row.parLevel}" oninput="updateW1RowValue(${index}, 'parLevel', this.value)"
                                                     class="w-full p-3 bg-white border border-slate-200 rounded-xl focus:border-brand-orange text-sm" placeholder="จุดสต๊อกเต็ม">
                                             </div>
@@ -3009,8 +3009,9 @@
                         <!-- Step 2: Bin -->
                         <div>
                             <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                                ${stepNum(2)} ระบุ Bin
+                                ${stepNum(2)} ระบุ Zone/Bin
                                 <span class="font-normal normal-case text-slate-400">(เช่น 1A, 2B, 3E)</span>
+
                             </p>
                             <input id="ls-bin-input" type="text" value="${bin}"
                                 placeholder="พิมพ์รหัส Bin..."
@@ -3033,15 +3034,15 @@
                             </div>` : `<p class="text-[11px] text-slate-400 mt-2 text-center">ยังไม่มี Bin ในชั้น ${floor} — สร้างใหม่ได้เลย</p>`}
                         </div>` : ''}
 
-                        <!-- Step 3: Par Level -->
+                        <!-- Step 3: จำนวนที่จัดเก็บได้ -->
                         ${floor ? `
                         <div>
                             <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                                ${stepNum(floor !== 'NOSTK' ? 3 : 2)} Par Level
+                                ${stepNum(floor !== 'NOSTK' ? 3 : 2)} จำนวนที่จัดเก็บได้
                                 <span class="font-normal normal-case text-slate-400">${isBulk ? '(ปล่อยว่างเพื่อคงค่าเดิม)' : '(ไม่บังคับ)'}</span>
                             </p>
                             <input type="number" min="0" value="${par}"
-                                placeholder="${isBulk ? 'คงค่า Par เดิมของแต่ละสินค้า' : 'ยอดสต๊อกเต็ม (ลัง)'}"
+                                placeholder="${isBulk ? 'คงค่าจำนวนเดิมของแต่ละสินค้า' : 'ความจุสูงสุดที่เก็บได้ (ลัง)'}"
                                 oninput="state.locationSheetParLevel=this.value"
                                 class="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-center focus:border-brand-orange focus:bg-white transition-all">
                         </div>` : ''}
