@@ -155,7 +155,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260604.03";
+        const CURRENT_VERSION = "20260611.01";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -1139,6 +1139,20 @@
             return 'หน่วย';
         }
 
+        // ── กันเบิกซ้ำ: สถานะที่ถือว่ายัง "เบิกค้างอยู่" สำหรับสินค้าหนึ่ง ──
+        const ACTIVE_W1_STATUSES = ['สั่งเบิก', 'กำลังจัดสินค้า'];
+        function normItemName(name) {
+            return (name || '').toString().trim().replace(/\s+/g, ' ').toLowerCase();
+        }
+        // ชื่อสินค้า (normalize) ที่มีคำขอเบิกค้างอยู่ใน state ปัจจุบัน
+        function getActiveRequestNames() {
+            const set = new Set();
+            state.items.forEach(i => {
+                if (ACTIVE_W1_STATUSES.includes(i.status)) set.add(normItemName(i.itemName));
+            });
+            return set;
+        }
+
         async function fetchInitialData(isRefresh = false, skipHideLoading = false) {
             if (!APPS_SCRIPT_URL) { hideLoading(); alert('กรุณาใส่ APPS_SCRIPT_URL ก่อนใช้งาน'); return; }
             if (!isRefresh) {
@@ -1433,6 +1447,12 @@
 
             if (!itemName || !qty) return;
 
+            // กันเบิกซ้ำ: ถ้าสินค้านี้มีคำขอเบิกค้างอยู่แล้ว ไม่ให้สร้างซ้ำ
+            if (getActiveRequestNames().has(normItemName(itemName))) {
+                alert(`⚠️ "${itemName}" มีคำขอเบิกที่ยังไม่เสร็จอยู่แล้ว\nไม่สามารถเบิกซ้ำได้ กรุณาตรวจสอบในรายการที่กำลังเบิก`);
+                return;
+            }
+
             const now = new Date();
             const newItem = {
                 id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
@@ -1468,10 +1488,20 @@
             const timestamp = formatDateTime(now.toISOString());
 
             // ── แยก: rows ที่มีรายการ "สินค้าหมด" อยู่แล้ว vs rows ใหม่ ──
-            const toRestore = [];  // { row, existingItem }
-            const toCreate  = [];  // row
+            // กันเบิกซ้ำ: ข้ามสินค้าที่มีคำขอค้างอยู่แล้ว หรือซ้ำกันเองในแบตช์นี้
+            const activeSet  = getActiveRequestNames();
+            const batchSeen  = new Set();
+            const toRestore  = [];  // { row, existingItem }
+            const toCreate   = [];  // row
+            const skippedDup = [];  // ชื่อสินค้าที่เบิกซ้ำ
 
             for (const row of validRows) {
+                const norm = normItemName(row.itemName);
+                if (activeSet.has(norm) || batchSeen.has(norm)) {
+                    skippedDup.push(row.itemName);
+                    continue;
+                }
+                batchSeen.add(norm);
                 const stockoutMatch = state.items.find(i =>
                     i.status === 'สินค้าหมด' && i.itemName === row.itemName
                 );
@@ -1480,6 +1510,14 @@
                 } else {
                     toCreate.push(row);
                 }
+            }
+
+            if (skippedDup.length > 0) {
+                alert(`⚠️ ข้ามรายการที่เบิกซ้ำ ${skippedDup.length} รายการ (มีคำขอค้างอยู่แล้ว):\n` +
+                    skippedDup.map(n => `• ${n}`).join('\n'));
+            }
+            if (toRestore.length === 0 && toCreate.length === 0) {
+                return;
             }
 
             // ถ้ามี conflict — แจ้งผู้ใช้ก่อน
@@ -1690,7 +1728,19 @@
 
             const now = new Date();
             const timestamp = formatDateTime(now.toISOString());
-            const newItems = list.map(item => ({
+
+            // กันเบิกซ้ำ: ข้ามสินค้าที่มีคำขอค้างอยู่แล้ว หรือซ้ำกันเองในรายการสำรวจ
+            const activeSet = getActiveRequestNames();
+            const seen = new Set();
+            const skippedDup = [];
+            const orderList = list.filter(item => {
+                const norm = normItemName(item.name);
+                if (activeSet.has(norm) || seen.has(norm)) { skippedDup.push(item.name); return false; }
+                seen.add(norm);
+                return true;
+            });
+
+            const newItems = orderList.map(item => ({
                 id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
                 rawDate: now,
                 timestamp,
@@ -1730,7 +1780,9 @@
             }
 
             hideLoading();
-            alert(`✅ ส่งเบิกสำเร็จ ${newItems.length} รายการ จากชั้น ${state.surveyFloor}`);
+            const surveyDupNote = skippedDup.length > 0
+                ? `\n⚠️ ข้ามที่เบิกซ้ำ ${skippedDup.length} รายการ: ${skippedDup.join(', ')}` : '';
+            alert(`✅ ส่งเบิกสำเร็จ ${newItems.length} รายการ จากชั้น ${state.surveyFloor}${surveyDupNote}`);
             sendAppLog('สำรวจสต๊อก+เบิก (Survey)', `ชั้น ${state.surveyFloor}: เบิก ${newItems.length} รายการ`);
             localStorage.removeItem('TRDAKRA_SURVEY_SESSION');
             state.surveyView = 'floors';
@@ -3604,6 +3656,11 @@
             const newOrders = [];
             const logItems = [];
 
+            // กันเบิกซ้ำ: ข้ามสินค้าที่มีคำขอค้างอยู่แล้ว (ยังบันทึก survey log ตามจริง)
+            const activeSet = getActiveRequestNames();
+            const seenOrder = new Set();
+            const skippedDup = [];
+
             locProducts.forEach(p => {
                 const edit = state.checkStockEdits[p.name];
                 if (edit && edit.checked) {
@@ -3616,7 +3673,12 @@
                         need = parseInt(edit.requestQty) || 0;
                     }
 
-                    if (need > 0) {
+                    const norm = normItemName(p.name);
+                    const isDup = need > 0 && (activeSet.has(norm) || seenOrder.has(norm));
+                    if (isDup) skippedDup.push(p.name);
+
+                    if (need > 0 && !isDup) {
+                        seenOrder.add(norm);
                         newOrders.push({
                             id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
                             rawDate: now,
@@ -3689,7 +3751,9 @@
                 await fetchInitialData(true, true); // skipHideLoading = true
 
                 // Show alert while loading is still covering the screen
-                alert(`✅ บันทึกสต๊อกสำเร็จ!\nส่งสั่งเบิก ${newOrders.length} รายการ จากโลเคชั่น ชั้น ${floor} - ${loc}`);
+                const csDupNote = skippedDup.length > 0
+                    ? `\n⚠️ ข้ามที่เบิกซ้ำ ${skippedDup.length} รายการ: ${skippedDup.join(', ')}` : '';
+                alert(`✅ บันทึกสต๊อกสำเร็จ!\nส่งสั่งเบิก ${newOrders.length} รายการ จากโลเคชั่น ชั้น ${floor} - ${loc}${csDupNote}`);
                 sendAppLog('ตรวจสต๊อกรายโลเคชั่น', `โลเคชั่น ชั้น ${floor} - ${loc}: ส่งเบิก ${newOrders.length} รายการ`);
             } catch (err) {
                 console.error(err);
