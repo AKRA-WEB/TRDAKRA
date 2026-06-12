@@ -122,7 +122,7 @@
 
 ## 4. 🛠️ แผนการแก้ไขโค้ด (Implementation Steps)
 
-### ส่วนที่ 1: อัปเดตไฟล์ Google Apps Script ([Code.gs.txt](file:///c:/Users/AKRA-Panich-Front/OneDrive/Desktop/WEBAPP/TRDAKRA/Code.gs.txt))
+### ส่วนที่ 1: อัปเดตไฟล์ Google Apps Script ([Code.gs.txt](file:///c:/Dev/WEBAPP/TRDAKRA/Code.gs.txt))
 เพิ่มฟังก์ชันสำหรับบันทึกข้อมูลสินค้าทีละหลายรายการเพื่อเพิ่มความเร็วในการบันทึก:
 ```javascript
 // เพิ่มในฟังก์ชัน doPost(e)
@@ -185,7 +185,7 @@ function updateProductDetailsBatch(itemNames, floor, location, parLevel) {
 }
 ```
 
-### ส่วนที่ 2: อัปเดตไฟล์หน้าบ้าน ([index.html](file:///c:/Users/AKRA-Panich-Front/OneDrive/Desktop/WEBAPP/TRDAKRA/index.html))
+### ส่วนที่ 2: อัปเดตไฟล์หน้าบ้าน ([index.html](file:///c:/Dev/WEBAPP/TRDAKRA/index.html))
 1. **โครงสร้าง State ใหม่:**
    * `locationBulkMode: false` — ตรวจสอบว่าแอปเปิดโหมดเลือกกลุ่มอยู่หรือไม่
    * `locationSelectedItems: {}` — เก็บรายชื่อสินค้าที่ถูกเลือกเป็น Key-Value เช่น `{"แป้งเค้ก": true}`
