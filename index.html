@@ -3,7 +3,8 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📦</text></svg>">
     <title>ระบบเบิกจ่ายสินค้า TRD-AKRA</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -55,6 +56,16 @@
             align-items: center; justify-content: center; flex-direction: column;
         }
         input, button { transition: all 0.2s ease-in-out; }
+
+        /* Accessibility: visible keyboard focus (mouse clicks stay clean via :focus-visible) */
+        a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+            outline: 2px solid #171C8F;
+            outline-offset: 2px;
+            border-radius: 6px;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+        }
 
         /* ── Desktop: Sidebar + Full-width Layout ── */
         @media (min-width: 768px) {
@@ -155,7 +166,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260611.01";
+        const CURRENT_VERSION = "20260612.06";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -166,6 +177,24 @@
         };
 
         let currentUser = null;
+        let sessionToken = null;  // SSO token ที่ verify แล้ว ใช้แนบกับทุก mutation POST
+
+        // แนบ token ไปกับ URL ของ mutation request (GAS อ่านจาก e.parameter.token)
+        function authUrl() {
+            return APPS_SCRIPT_URL + (sessionToken ? '?token=' + encodeURIComponent(sessionToken) : '');
+        }
+
+        // escape ค่าที่ไม่น่าเชื่อถือ (จาก Sheet/ผู้ใช้) ก่อนใส่ใน HTML text หรือ attribute ที่ครอบด้วย " " (กัน XSS)
+        function esc(v) {
+            if (v === null || v === undefined) return '';
+            return String(v)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+        const attr = esc; // alias ตามชื่อในแผน — logic เดียวกัน (ใช้สำหรับ attribute context)
 
         // UI helpers สำหรับแสดง error และ redirect
         function ssoShowError(message) {
@@ -176,9 +205,9 @@
 
         // ฟังก์ชัน verify token + init app — เรียกใน window.onload
         async function ssoInit() {
-            // ── DEV BYPASS: localhost หรือ ?demo=1 → ข้าม SSO ──
-            const isLocalhost = ['localhost', '127.0.0.1'].includes(location.hostname);
-            const isDemoMode  = new URLSearchParams(location.search).get('demo') === '1';
+            // ── DEV BYPASS: เฉพาะ localhost เท่านั้น (?demo=1 ใช้ได้เฉพาะบน localhost เพื่อกัน bypass บน production) ──
+            const isLocalhost = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
+            const isDemoMode  = isLocalhost && new URLSearchParams(location.search).get('demo') === '1';
             if (isLocalhost || isDemoMode) {
                 currentUser = 'ทดสอบระบบ';
                 showLoading('กำลังโหลดข้อมูล (Demo Mode)...');
@@ -212,13 +241,15 @@
                         return;
                     }
 
-                    // Token ผ่าน — บันทึก session ไว้ใช้ตอน refresh หน้า
+                    // Token ผ่าน — บันทึก session + token ไว้ใช้ตอน refresh หน้า และแนบกับ mutation
                     localStorage.setItem(SSO_CONFIG.STORAGE_KEY, JSON.stringify({
                         name:  result.user.name,
                         id:    result.user.id,
-                        roles: result.user.roles
+                        roles: result.user.roles,
+                        token: ssoToken
                     }));
                     currentUser = result.user.name;
+                    sessionToken = ssoToken;
 
                 } catch(e) {
                     ssoShowError('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์เพื่อตรวจสอบสิทธิ์ได้');
@@ -234,6 +265,12 @@
                 }
                 try {
                     const session = JSON.parse(cached);
+                    // session เก่าที่ไม่มี token (ก่อนเวอร์ชันนี้) ใช้ mutation ไม่ได้ → บังคับ login ใหม่เพื่อรับ token
+                    if (!session.token) {
+                        localStorage.removeItem(SSO_CONFIG.STORAGE_KEY);
+                        ssoShowError('กรุณาเข้าสู่ระบบใหม่ผ่านหน้า Portal');
+                        return;
+                    }
                     const hasPermission = SSO_CONFIG.REQUIRED_ROLES.length === 0 ||
                         session.roles.some(r => SSO_CONFIG.REQUIRED_ROLES.includes(r));
                     if (!hasPermission) {
@@ -242,6 +279,7 @@
                         return;
                     }
                     currentUser = session.name;
+                    sessionToken = session.token;
                 } catch(e) {
                     localStorage.removeItem(SSO_CONFIG.STORAGE_KEY);
                     ssoShowError('Session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่');
@@ -427,63 +465,65 @@
         }
 
         // ── บันทึก Floor/Location/ParLevel กลับ Google Sheet ──
+        // คืน true เมื่อบันทึกสำเร็จจริง (หรือไม่มีอะไรต้องบันทึก), false เมื่อ stale/ล้มเหลว
         async function pushProductDetails(itemName, floor, location, parLevel) {
-            if (!itemName || (!floor && !location && !parLevel)) return;
+            if (await AppVersionGuard.blockIfStale()) return false;
+            if (!itemName || (!floor && !location && !parLevel)) return true;
             try {
-                await fetch(APPS_SCRIPT_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify({ action: 'updateProductDetails', name: itemName, floor, location, parLevel: parseInt(parLevel) || 0 })
-                });
-                // อัปเดต state.products ด้วย ไม่ต้อง reload
+                await postMutation({ action: 'updateProductDetails', name: itemName, floor, location, parLevel: parseInt(parLevel) || 0 });
+                // อัปเดต state.products ด้วย ไม่ต้อง reload (เฉพาะเมื่อบันทึกสำเร็จจริง)
                 const idx = state.products.findIndex(p => (p.name || '').trim() === itemName.trim());
                 if (idx !== -1) {
                     if (floor)    state.products[idx].floor    = floor;
                     if (location) state.products[idx].location = location;
                     if (parLevel) state.products[idx].parLevel = parseInt(parLevel) || 0;
                 }
-            } catch (err) { console.error('pushProductDetails error', err); }
+                return true;
+            } catch (err) { console.error('pushProductDetails error', err); return false; }
         }
 
         // ── บันทึก Floor/Location/ParLevel แบบกลุ่ม กลับ Google Sheet ──
+        // คืน true เมื่อบันทึกครบสำเร็จ, false เมื่อ stale หรือมีรายการที่บันทึกไม่สำเร็จ
         async function pushProductDetailsBatch(names, floor, location, parLevel) {
-            if (!names || names.length === 0 || (!floor && !location && !parLevel)) return;
-            
+            if (await AppVersionGuard.blockIfStale()) return false;
+            if (!names || names.length === 0 || (!floor && !location && !parLevel)) return true;
+
             // ลองรันแบบ Batch API เพื่อความรวดเร็ว
             try {
-                const res = await fetch(APPS_SCRIPT_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify({ 
-                        action: 'updateProductDetailsBatch', 
-                        names: names, 
-                        floor, 
-                        location, 
-                        parLevel: parseInt(parLevel) || 0 
-                    })
+                await postMutation({
+                    action: 'updateProductDetailsBatch',
+                    names: names,
+                    floor,
+                    location,
+                    parLevel: parseInt(parLevel) || 0
                 });
-                const resJson = await res.json();
-                if (resJson && resJson.status === 'success') {
-                    // อัปเดตข้อมูลภายในเครื่องทันที
-                    names.forEach(name => {
-                        const idx = state.products.findIndex(p => (p.name || '').trim() === name.trim());
-                        if (idx !== -1) {
-                            if (floor)    state.products[idx].floor    = floor;
-                            if (location !== undefined) state.products[idx].location = location;
-                            if (parLevel) state.products[idx].parLevel = parseInt(parLevel) || 0;
-                        }
-                    });
-                    return;
-                }
+                // อัปเดตข้อมูลภายในเครื่องทันที (เฉพาะเมื่อบันทึกสำเร็จจริง)
+                names.forEach(name => {
+                    const idx = state.products.findIndex(p => (p.name || '').trim() === name.trim());
+                    if (idx !== -1) {
+                        if (floor)    state.products[idx].floor    = floor;
+                        if (location !== undefined) state.products[idx].location = location;
+                        if (parLevel) state.products[idx].parLevel = parseInt(parLevel) || 0;
+                    }
+                });
+                return true;
             } catch (err) {
+                // auth/backend ปฏิเสธ — ห้าม fallback มากลบ failure (จะ retry แล้วโดนปฏิเสธเหมือนเดิมแบบเงียบ)
+                const reason = (err && err.message) || '';
+                if (reason === 'no_token' || reason === 'invalid_or_expired_token' || reason === 'verify_failed') {
+                    console.error('pushProductDetailsBatch auth error', err);
+                    return false;
+                }
                 console.warn('Batch API failed or not deployed yet, falling back to sequential updates...', err);
             }
-            
-            // กรณีไม่มี API ใหม่บนเซิร์ฟเวอร์ ให้ยิงแบบเรียงลำดับทีละตัว (Sequential Fallback)
-            console.log('Running sequential fallback updates for names:', names);
+
+            // กรณี endpoint batch ไม่พร้อม (เซิร์ฟเวอร์เก่า) ยิงแบบเรียงลำดับทีละตัว แล้วรวมผล
+            let allOk = true;
             for (const name of names) {
-                await pushProductDetails(name, floor, location, parLevel);
+                const ok = await pushProductDetails(name, floor, location, parLevel);
+                if (!ok) allOk = false;
             }
+            return allOk;
         }
 
         // ── Logic คำนวณสถานะสต๊อก ──
@@ -722,15 +762,17 @@
             try {
                 if (name === 'BULK_MODE') {
                     const selectedNames = Object.keys(state.locationSelectedItems);
-                    await pushProductDetailsBatch(selectedNames, floor, floor === 'NOSTK' ? '' : zone, parLevel);
+                    const ok = await pushProductDetailsBatch(selectedNames, floor, floor === 'NOSTK' ? '' : zone, parLevel);
+                    if (!ok) { hideLoading(); alert('บันทึกโลเคชั่นไม่สำเร็จ ข้อมูลอาจยังไม่ถูกบันทึก กรุณาลองใหม่'); return; }
                     localStorage.removeItem('TRDAKRA_DATA');
                     sendAppLog('จัดโลเคชั่นกลุ่ม (TRD)', `${selectedNames.length} รายการ → ${floor === 'NOSTK' ? 'NOSTK' : 'W1-' + floor + 'F-' + zone}`);
-                    
+
                     // ล้างสเตตหลังบันทึกเสร็จ
                     state.locationSelectedItems = {};
                     state.locationBulkMode = false;
                 } else {
-                    await pushProductDetails(name, floor, floor === 'NOSTK' ? '' : zone, parLevel);
+                    const ok = await pushProductDetails(name, floor, floor === 'NOSTK' ? '' : zone, parLevel);
+                    if (!ok) { hideLoading(); alert('บันทึกโลเคชั่นไม่สำเร็จ ข้อมูลอาจยังไม่ถูกบันทึก กรุณาลองใหม่'); return; }
                     localStorage.removeItem('TRDAKRA_DATA');
                     sendAppLog('จัดโลเคชั่นสินค้า (TRD)', `${name} → ${floor === 'NOSTK' ? 'NOSTK' : 'W1-' + floor + 'F-' + zone}`);
                 }
@@ -975,7 +1017,7 @@
                          id="popup-row-${enc}"
                          class="bg-white p-3.5 rounded-2xl border shadow-sm mb-2.5 flex items-center justify-between gap-3 cursor-pointer transition-all ${bgClass}">
                         <div class="flex-1 min-w-0">
-                            <p class="font-bold text-brand-blue text-sm leading-snug truncate mb-1">${p.name}</p>
+                            <p class="font-bold text-brand-blue text-sm leading-snug truncate mb-1">${esc(p.name)}</p>
                             <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-500 border border-rose-200">🔴 ยังไม่มีโลเคชั่น</span>
                         </div>
                         <span id="popup-check-${enc}" class="material-icons-round ${checkColor} text-[24px] flex-shrink-0 select-none">
@@ -1198,16 +1240,44 @@
             }
         }
 
+        // ส่ง mutation ไป backend แล้วตรวจผลจริง — throw Error(reason) เมื่อ HTTP ไม่ ok หรือ backend ตอบ error/success:false
+        async function postMutation(payload) {
+            const res = await fetch(authUrl(), {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error('http_' + res.status);
+            let data;
+            try { data = await res.json(); } catch (e) { throw new Error('bad_response'); }
+            if (data && (data.status === 'error' || data.success === false)) {
+                throw new Error(data.reason || data.message || 'save_failed');
+            }
+            return data;
+        }
+
+        // ข้อความ error ที่เป็นมิตร แยกเคส auth/เซสชันหมดอายุ ออกจากความผิดพลาดทั่วไป
+        function saveErrorMessage(err) {
+            const r = (err && err.message) || '';
+            if (r === 'no_token' || r === 'invalid_or_expired_token' || r === 'verify_failed') {
+                return 'เซสชันหมดอายุหรือสิทธิ์ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่';
+            }
+            return 'บันทึกไม่สำเร็จ ข้อมูลอาจยังไม่ถูกบันทึก กรุณาลองใหม่อีกครั้ง';
+        }
+
+        // คืน true เมื่อบันทึกสำเร็จจริง, false เมื่อล้มเหลว (caller ต้องไม่แสดงสำเร็จเมื่อ false)
         async function syncDataToSheet(skipHideLoading = false) {
-            if (!APPS_SCRIPT_URL) return;
+            if (await AppVersionGuard.blockIfStale()) return false;
+            if (!APPS_SCRIPT_URL) return false;
             showLoading('กำลังบันทึกข้อมูล...');
             try {
                 const itemsToSave = state.items.map(({rawDate, ...rest}) => rest);
-                await fetch(APPS_SCRIPT_URL, {
-                    method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(itemsToSave)
-                });
+                await postMutation(itemsToSave);
+                return true;
             } catch (error) {
-                console.error('Error saving data:', error); alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+                console.error('Error saving data:', error);
+                alert(saveErrorMessage(error));
+                return false;
             } finally {
                 if (!skipHideLoading) {
                     hideLoading();
@@ -1233,7 +1303,7 @@
                 listDiv.innerHTML = filtered.map(p => `
                     <div onclick="selectProduct(decodeURIComponent('${encodeURIComponent(p.name)}'), decodeURIComponent('${encodeURIComponent(p.unit)}'), ${index})" 
                          class="px-4 py-3 hover:bg-blue-50 hover:text-blue-700 cursor-pointer border-b border-slate-50 text-sm text-slate-700 last:border-0 truncate flex items-center gap-3 transition-colors">
-                        <span class="material-icons-round text-blue-300 text-[18px]">inventory_2</span> ${p.name} <span class="text-xs text-slate-400">(${p.unit})</span>
+                        <span class="material-icons-round text-blue-300 text-[18px]">inventory_2</span> ${esc(p.name)} <span class="text-xs text-slate-400">(${esc(p.unit)})</span>
                     </div>
                 `).join('');
             }
@@ -1292,7 +1362,7 @@
             );
             state.w2BatchEdits = {};
             render();
-            await syncDataToSheet();
+            if (!(await syncDataToSheet())) { await fetchInitialData(true); hideLoading(); return; }
             sendAppLog('ล้างสินค้าหมด (AKRA)', `${stockoutItems.length} รายการ → ยกเลิกรายการ`);
             hideLoading();
         }
@@ -1471,7 +1541,7 @@
             state.w1Tab = 'pending'; 
             render(); 
             
-            await syncDataToSheet(); 
+            if (!(await syncDataToSheet())) { await fetchInitialData(true); return; }
             alert('ส่งคำขอเบิกสินค้าเรียบร้อยแล้ว!');
             const unit = getProductUnitClient(itemName);
             sendAppLog("สั่งเบิกสินค้า (TRD)", `เบิก: ${itemName} จำนวน ${qty} ${unit} (ความจุ: ${storageCapacity})`);
@@ -1582,7 +1652,7 @@
             state.w1Tab = 'pending';
             render();
 
-            await syncDataToSheet();
+            if (!(await syncDataToSheet())) { hideLoading(); await fetchInitialData(true); return; }
 
             // อัปเดต Floor/Location/ParLevel กลับ Product Sheet
             for (const row of validRows) {
@@ -1608,7 +1678,7 @@
                     : item
             );
             render();
-            await syncDataToSheet();
+            if (!(await syncDataToSheet())) { await fetchInitialData(true); return; }
             sendAppLog('ยกเลิกการเบิก (TRD)', `ID: ${id}`);
         }
 
@@ -1722,6 +1792,7 @@
         }
 
         async function handleSurveyBulkOrder() {
+            if (await AppVersionGuard.blockIfStale()) return;
             const list = state.surveyConfirmList;
             if (!list || list.length === 0) return;
             showLoading('กำลังส่งรายการเบิก...');
@@ -1755,19 +1826,15 @@
 
             state.items = [...newItems, ...state.items];
             render();
-            await syncDataToSheet();
+            if (!(await syncDataToSheet())) { hideLoading(); await fetchInitialData(true); return; }
 
-            // บันทึก SurveyLog
+            // บันทึก SurveyLog (non-fatal: รายการเบิกถูกบันทึกแล้ว)
             const logItems = list.map(item => {
                 const data = state.surveyData[item.name] || {};
                 return { name: item.name, currentStock: parseInt(data.currentStock) || 0, parLevel: item.parLevel, needToOrder: item.needOrder, status: item.status };
             });
             try {
-                await fetch(APPS_SCRIPT_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify({ action: 'saveSurveyLog', surveyedBy: currentUser || 'ไม่ทราบ', floor: state.surveyFloor, items: logItems })
-                });
+                await postMutation({ action: 'saveSurveyLog', surveyedBy: currentUser || 'ไม่ทราบ', floor: state.surveyFloor, items: logItems });
             } catch(e) { console.error('SurveyLog error', e); }
 
             // อัปเดต ParLevel กลับ Product Sheet
@@ -1804,7 +1871,7 @@
                 'สินค้าหมด':    'bg-rose-50 text-rose-700 border-rose-200/60',
                 'ยกเลิกรายการ': 'bg-slate-50 text-slate-400 border-slate-200'
             };
-            return `<span class="px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wide uppercase border ${styles[status] || 'bg-slate-100'}">${status}</span>`;
+            return `<span class="px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wide uppercase border ${styles[status] || 'bg-slate-100'}">${esc(status)}</span>`;
         }
 
         function renderEmptyState(message, iconName) {
@@ -1823,7 +1890,7 @@
                     <div class="bg-white p-5 rounded-[1.5rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100 opacity-95 hover:opacity-100 transition-opacity">
                         <div class="flex justify-between items-start mb-3">
                             <div class="pr-2">
-                                <h3 class="font-bold text-brand-blue text-[15px] leading-tight">${item.itemName}</h3>
+                                <h3 class="font-bold text-brand-blue text-[15px] leading-tight">${esc(item.itemName)}</h3>
                                 <div class="flex items-center gap-1.5 text-[10px] text-slate-400 mt-1 font-medium flex-wrap">
                                     <span class="font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[9px] font-semibold">ID: ${item.id}</span>
                                     <span class="inline-flex items-center gap-0.5 text-slate-500">
@@ -1833,7 +1900,7 @@
                                     ${item.requestedBy ? `
                                         <span class="inline-flex items-center gap-0.5 text-brand-blue bg-brand-blue/5 border border-brand-blue/10 px-1.5 py-0.5 rounded-[4px] text-[9px] font-semibold">
                                             <span class="material-icons-round text-[11px] text-brand-blue/70">account_circle</span>
-                                            ${item.requestedBy}
+                                            ${esc(item.requestedBy)}
                                         </span>
                                     ` : ''}
                                 </div>
@@ -1875,8 +1942,8 @@
                                     ` : ''}
                                 </div>
                                 ${item.status === 'จัดส่งแล้ว' ? `
-                                    <p class="mt-1 text-slate-600">เบิก <span class="font-semibold text-slate-700">${item.requestQty} ${getProductUnitClient(item.itemName)}</span> (ความจุ ${item.storageCapacity || 0}) • ส่งจริง <span class="font-semibold text-emerald-600">${item.receiveQty} ${getProductUnitClient(item.itemName)}</span></p>
-                                    ${role === 'w1' ? `<p class="text-[11px] text-brand-blue font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">hourglass_empty</span> EXP ใหม่: ${item.newExpiry}</p>` : ''}
+                                    <p class="mt-1 text-slate-600">เบิก <span class="font-semibold text-slate-700">${item.requestQty} ${esc(getProductUnitClient(item.itemName))}</span> (ความจุ ${item.storageCapacity || 0}) • ส่งจริง <span class="font-semibold text-emerald-600">${item.receiveQty} ${esc(getProductUnitClient(item.itemName))}</span></p>
+                                    ${role === 'w1' ? `<p class="text-[11px] text-brand-blue font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">hourglass_empty</span> EXP ใหม่: ${esc(item.newExpiry)}</p>` : ''}
                                 ` : ''}
                                 ${item.status === 'จัดส่งไม่ครบ' ? (() => {
                                     const shortage = item.requestQty - (item.receiveQty || 0);
@@ -1884,22 +1951,22 @@
                                     <div class="mt-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
                                         <div class="flex items-center justify-between text-sm">
                                             <span class="text-slate-500">สั่ง</span>
-                                            <span class="font-bold text-slate-700">${item.requestQty} ${getProductUnitClient(item.itemName)}</span>
+                                            <span class="font-bold text-slate-700">${item.requestQty} ${esc(getProductUnitClient(item.itemName))}</span>
                                         </div>
                                         <div class="flex items-center justify-between text-sm mt-0.5">
                                             <span class="text-slate-500">ได้รับ</span>
-                                            <span class="font-bold text-amber-700">${item.receiveQty || 0} ${getProductUnitClient(item.itemName)}</span>
+                                            <span class="font-bold text-amber-700">${item.receiveQty || 0} ${esc(getProductUnitClient(item.itemName))}</span>
                                         </div>
                                         <div class="flex items-center justify-between text-sm mt-0.5 pt-1.5 border-t border-amber-200">
                                             <span class="font-bold text-rose-600">ขาด</span>
-                                            <span class="font-black text-rose-600">${shortage} ${getProductUnitClient(item.itemName)}</span>
+                                            <span class="font-black text-rose-600">${shortage} ${esc(getProductUnitClient(item.itemName))}</span>
                                         </div>
                                     </div>`;
                                 })() : ''}
                             </div>
-                            ${item.status === 'จัดส่งแล้ว' && item.receiveNote && item.receiveNote !== 'ครบ' ? `<div class="text-[10px] font-medium text-brand-orange bg-brand-orange/5 px-2 py-0.5 rounded-md border border-brand-orange/20 mt-1">จัดส่ง${item.receiveNote}</div>` : ''}
+                            ${item.status === 'จัดส่งแล้ว' && item.receiveNote && item.receiveNote !== 'ครบ' ? `<div class="text-[10px] font-medium text-brand-orange bg-brand-orange/5 px-2 py-0.5 rounded-md border border-brand-orange/20 mt-1">จัดส่ง${esc(item.receiveNote)}</div>` : ''}
                         </div>
-                        ${item.w2Note ? `<p class="text-[11px] mt-3 text-amber-700 bg-amber-50 px-3 py-2 rounded-xl border border-amber-100/50"><span class="font-bold">โน้ต:</span> ${item.w2Note}</p>` : ''}
+                        ${item.w2Note ? `<p class="text-[11px] mt-3 text-amber-700 bg-amber-50 px-3 py-2 rounded-xl border border-amber-100/50"><span class="font-bold">โน้ต:</span> ${esc(item.w2Note)}</p>` : ''}
                     </div>
                 `).join('')}</div>`;
         }
@@ -1979,7 +2046,7 @@
                 <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative animate-fade-in">
                     <header class="bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
                         <div class="flex items-center gap-2">
-                            <button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
+                            <button onclick="setView('home')" aria-label="กลับหน้าหลัก" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
                                 <span class="material-icons-round">arrow_back</span>
                             </button>
                             <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5">
@@ -2087,9 +2154,9 @@
                         ${topRequesters.map(r => `
                             <div class="flex items-center gap-3 p-3">
                                 <div class="w-8 h-8 rounded-full bg-brand-blue/10 text-brand-blue flex items-center justify-center font-bold text-xs flex-shrink-0">
-                                    ${r.name.charAt(0).toUpperCase()}
+                                    ${esc(r.name.charAt(0).toUpperCase())}
                                 </div>
-                                <span class="text-sm font-semibold text-slate-700 flex-1 truncate">${r.name}</span>
+                                <span class="text-sm font-semibold text-slate-700 flex-1 truncate">${esc(r.name)}</span>
                                 <span class="text-xs font-bold text-brand-orange bg-brand-orange/10 px-2 py-0.5 rounded-lg">${r.count} บิล</span>
                             </div>
                         `).join('')}
@@ -2110,7 +2177,7 @@
                                         <div class="flex justify-between items-start mb-3">
                                             <div class="flex-1 pr-3">
                                                 <span class="text-[10px] font-bold text-slate-400">อันดับ ${idx + 1}</span>
-                                                <h4 class="font-bold text-brand-blue text-[15px] leading-tight mt-0.5">${item.name}</h4>
+                                                <h4 class="font-bold text-brand-blue text-[15px] leading-tight mt-0.5">${esc(item.name)}</h4>
                                             </div>
                                             <div class="text-right">
                                                 <p class="font-bold text-brand-orange text-lg leading-none">${item.qty.toLocaleString()} <span class="text-[10px] font-medium text-brand-orange/80">ชิ้น</span></p>
@@ -2146,7 +2213,7 @@
                                             ${bill.dispatchTimestamp ? `<span class="inline-flex items-center gap-0.5"><span class="material-icons-round text-[11px] text-emerald-500">local_shipping</span>จัดส่ง: ${bill.dispatchTimestamp.split(' / ')[0]}</span>` : ''}
                                         </div>
                                     </div>
-                                    <p class="text-sm font-bold text-slate-800 mb-1 truncate">${bill.itemName}</p>
+                                    <p class="text-sm font-bold text-slate-800 mb-1 truncate">${esc(bill.itemName)}</p>
                                     <div class="flex justify-between items-end">
                                         <div class="text-[10px] text-slate-500 flex items-center gap-1 mt-1">
                                             <span class="material-icons-round text-[12px] text-slate-400">inventory_2</span>
@@ -2333,12 +2400,12 @@
                                 return `
                                     <div class="p-3 flex items-center gap-3">
                                         <div class="flex-1 min-w-0">
-                                            <p class="text-sm font-semibold text-slate-800 truncate">${item.itemName}</p>
-                                            ${item.requestedBy ? `<p class="text-[10px] text-slate-400">โดย: ${item.requestedBy}</p>` : ''}
+                                            <p class="text-sm font-semibold text-slate-800 truncate">${esc(item.itemName)}</p>
+                                            ${item.requestedBy ? `<p class="text-[10px] text-slate-400">โดย: ${esc(item.requestedBy)}</p>` : ''}
                                         </div>
                                         <div class="flex items-center gap-2 flex-shrink-0">
                                             ${item.receiveQty ? `<span class="text-xs font-bold text-brand-orange">${item.receiveQty} ชิ้น</span>` : ''}
-                                            <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full ${chipCls}">${item.status}</span>
+                                            <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full ${chipCls}">${esc(item.status)}</span>
                                         </div>
                                     </div>
                                 `;
@@ -2389,7 +2456,7 @@
                                 <div class="p-3 flex items-center gap-3">
                                     <div class="w-7 h-7 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center font-bold text-xs flex-shrink-0">${idx + 1}</div>
                                     <div class="flex-1 min-w-0">
-                                        <p class="text-sm font-semibold text-slate-800 truncate">${item.name}</p>
+                                        <p class="text-sm font-semibold text-slate-800 truncate">${esc(item.name)}</p>
                                         <p class="text-[10px] text-slate-400">ล่าสุด: ${getDaysAgo(item.lastDate)}</p>
                                     </div>
                                     <span class="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg">${item.count} ครั้ง</span>
@@ -2409,11 +2476,11 @@
                             ${cancelledItems.map(item => `
                                 <div class="p-3">
                                     <div class="flex justify-between items-start mb-1">
-                                        <p class="text-sm font-semibold text-slate-800 flex-1 pr-2 truncate">${item.itemName}</p>
+                                        <p class="text-sm font-semibold text-slate-800 flex-1 pr-2 truncate">${esc(item.itemName)}</p>
                                         <span class="text-[9px] text-slate-400 flex-shrink-0">${item.timestamp ? item.timestamp.split(' / ')[0] : ''}</span>
                                     </div>
-                                    ${item.requestedBy ? `<p class="text-[10px] text-slate-400">โดย: ${item.requestedBy}</p>` : ''}
-                                    ${item.w2Note ? `<p class="text-[10px] text-slate-500 bg-slate-50 rounded-lg px-2 py-1 mt-1">${item.w2Note}</p>` : ''}
+                                    ${item.requestedBy ? `<p class="text-[10px] text-slate-400">โดย: ${esc(item.requestedBy)}</p>` : ''}
+                                    ${item.w2Note ? `<p class="text-[10px] text-slate-500 bg-slate-50 rounded-lg px-2 py-1 mt-1">${esc(item.w2Note)}</p>` : ''}
                                 </div>
                             `).join('')}
                         </div>`
@@ -2487,10 +2554,10 @@
                                 <div class="bg-brand-blue/5 px-4 py-2.5 border-b border-slate-100 flex items-center gap-2">
                                     <span class="material-icons-round text-brand-blue text-[16px]">assignment</span>
                                     <div class="flex-1">
-                                        <span class="text-xs font-bold text-brand-blue">${/^\d+$/.test(session.floor) ? 'ชั้น ' + session.floor : session.floor || '-'}</span>
+                                        <span class="text-xs font-bold text-brand-blue">${esc(/^\d+$/.test(session.floor) ? 'ชั้น ' + session.floor : session.floor || '-')}</span>
                                         <span class="text-[10px] text-slate-400 ml-2">${session.date}</span>
                                     </div>
-                                    <span class="text-[10px] text-slate-400">โดย: ${session.surveyedBy || '-'}</span>
+                                    <span class="text-[10px] text-slate-400">โดย: ${esc(session.surveyedBy || '-')}</span>
                                 </div>
                                 <div class="divide-y divide-slate-50">
                                     ${session.items.map(item => {
@@ -2591,7 +2658,7 @@
                     <div class="md:hidden w-full max-w-sm flex flex-col items-center justify-center p-5 mx-auto relative min-h-screen">
                         <div class="absolute top-6 right-6 bg-white/90 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-sm border border-slate-100 flex items-center gap-1.5 text-xs font-semibold text-brand-blue z-10 tracking-wide">
                             <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
-                            ${currentUser}
+                            ${esc(currentUser)}
                         </div>
                         <div class="bg-white p-10 rounded-[2.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.06)] w-full text-center border border-slate-50 mt-6">
                             <div class="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 bg-brand-blue/10 text-brand-blue shadow-inner">
@@ -2615,7 +2682,7 @@
                         <!-- Top header bar -->
                         <div class="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between">
                             <div>
-                                <h1 class="text-xl font-bold text-slate-800">สวัสดี, ${currentUser} 👋</h1>
+                                <h1 class="text-xl font-bold text-slate-800">สวัสดี, ${esc(currentUser)} 👋</h1>
                                 <p class="text-sm text-slate-400 mt-0.5">${dateStr}</p>
                             </div>
                             <div class="flex items-center gap-3">
@@ -2703,7 +2770,7 @@
                                         <div>
                                             <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">ชื่อสินค้า #${index + 1}</label>
                                             <div class="relative">
-                                                <input type="text" value="${row.itemName}"
+                                                <input type="text" value="${esc(row.itemName)}"
                                                     oninput="updateW1RowValue(${index}, 'itemName', this.value); filterProducts(this.value, ${index})"
                                                     onfocus="filterProducts(this.value, ${index})"
                                                     onblur="setTimeout(() => { const el = document.getElementById('autocomplete-list-${index}'); if(el) el.classList.add('hidden'); }, 200)"
@@ -2736,7 +2803,7 @@
                                             </div>
                                             <div>
                                                 <label class="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-1.5 ml-1">📍 โลเคชั่น</label>
-                                                <input type="text" value="${row.location}" oninput="updateW1RowValue(${index}, 'location', this.value)"
+                                                <input type="text" value="${esc(row.location)}" oninput="updateW1RowValue(${index}, 'location', this.value)"
                                                     class="w-full p-2.5 bg-white border border-emerald-200 rounded-xl focus:border-emerald-500 text-sm" placeholder="โคเลชั่นสินค้า เช่น 1-1A">
                                             </div>
                                             ${row.floor || row.location ? `<p class="col-span-2 text-[9px] text-emerald-600 font-semibold -mt-1 ml-1">💾 ระบบจะจำตำแหน่งนี้ไว้กับสินค้านี้</p>` : `<p class="col-span-2 text-[9px] text-slate-400 -mt-1 ml-1">กรอกตำแหน่งที่เก็บสินค้า (ใช้ในระบบสำรวจ)</p>`}
@@ -2744,7 +2811,7 @@
 
                                         <div>
                                             <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">หมดอายุเก่า</label>
-                                            <input type="text" value="${row.oldExpiry}" oninput="updateW1RowValue(${index}, 'oldExpiry', this.value)"
+                                            <input type="text" value="${esc(row.oldExpiry)}" oninput="updateW1RowValue(${index}, 'oldExpiry', this.value)"
                                                 class="w-full p-3 bg-white border border-slate-200 rounded-xl focus:border-brand-blue text-sm" placeholder="วว-ดด-ปป">
                                         </div>
                                     </div>
@@ -2769,7 +2836,7 @@
                         <div class="bg-white p-5 rounded-[1.5rem] shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-slate-100 transition-all">
                             <div class="flex justify-between items-start mb-4">
                                 <div class="pr-2">
-                                    <h3 class="font-bold text-brand-blue text-[16px] leading-snug">${item.itemName}</h3>
+                                    <h3 class="font-bold text-brand-blue text-[16px] leading-snug">${esc(item.itemName)}</h3>
                                     <div class="flex items-center gap-1.5 text-[10px] text-slate-400 mt-1 font-medium flex-wrap">
                                         <span class="font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[9px] font-semibold">ID: ${item.id}</span>
                                         <span class="inline-flex items-center gap-0.5 text-slate-500">
@@ -2779,7 +2846,7 @@
                                         ${item.requestedBy ? `
                                             <span class="inline-flex items-center gap-0.5 text-brand-blue bg-brand-blue/5 border border-brand-blue/10 px-1.5 py-0.5 rounded-[4px] text-[9px] font-semibold">
                                                 <span class="material-icons-round text-[11px] text-brand-blue/70">account_circle</span>
-                                                ${item.requestedBy}
+                                                ${esc(item.requestedBy)}
                                             </span>
                                         ` : ''}
                                     </div>
@@ -2790,7 +2857,7 @@
                                 <div><p class="text-[10px] font-semibold text-brand-blue uppercase tracking-wider mb-0.5">ยอดเบิก / ความจุ</p><p class="font-bold text-brand-blue text-lg">${item.requestQty} <span class="text-xs font-medium text-brand-blue/70">${getProductUnitClient(item.itemName)}</span> / ${item.storageCapacity || 0} <span class="text-xs font-medium text-brand-blue/70">สต๊อคจัดเก็บได้</span></p></div>
                                 <div class="text-right"><p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-0.5">เวลาเบิก</p><p class="text-xs text-slate-700 font-medium">${item.timestamp.split(' / ')[1] || '-'}</p><p class="text-[10px] text-slate-400">${item.timestamp.split(' / ')[0] || '-'}</p></div>
                             </div>
-                            ${item.w2Note ? `<p class="text-xs mb-4 text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-100 flex items-start gap-2"><span class="material-icons-round text-[16px] mt-px">info</span> <span>${item.w2Note}</span></p>` : ''}
+                            ${item.w2Note ? `<p class="text-xs mb-4 text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-100 flex items-start gap-2"><span class="material-icons-round text-[16px] mt-px">info</span> <span>${esc(item.w2Note)}</span></p>` : ''}
                             ${item.status === 'สั่งเบิก' ? `<div class="flex justify-end"><button onclick="if(confirm('ต้องการยกเลิกรายการเบิกนี้ใช่หรือไม่?')) cancelW1Item('${item.id}')" class="text-[11px] font-semibold tracking-wide text-brand-orange hover:bg-brand-orange/10 px-3 py-1.5 rounded-full flex items-center gap-1 transition-colors">ยกเลิกการเบิก</button></div>` : ''}
                         </div>
                     `).join('') + `</div>`;
@@ -2800,10 +2867,10 @@
             return `
                 <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative">
                     <header class="bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
-                        <div class="flex items-center gap-2"><button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button><h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">storefront</span> หน้าร้าน (TRD)</h1></div>
+                        <div class="flex items-center gap-2"><button onclick="setView('home')" aria-label="กลับหน้าหลัก" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button><h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">storefront</span> หน้าร้าน (TRD)</h1></div>
                         <div class="flex items-center gap-2">
                             <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white" title="รีเฟรชข้อมูล"><span class="material-icons-round text-[20px]">refresh</span></button>
-                            <div class="text-[10px] font-semibold tracking-wide bg-black/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-white/10"><span class="material-icons-round text-[14px]">account_circle</span> ${currentUser || 'Demo'}</div>
+                            <div class="text-[10px] font-semibold tracking-wide bg-black/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-white/10"><span class="material-icons-round text-[14px]">account_circle</span> ${esc(currentUser || 'Demo')}</div>
                         </div>
                     </header>
                     <div class="flex bg-white shadow-sm sticky top-[60px] z-10 border-b border-slate-100 px-2">
@@ -2877,9 +2944,9 @@
                          class="flex items-center gap-3 p-3.5 cursor-pointer active:scale-[0.99] transition-all select-none">
                         <div class="w-9 h-9 flex-shrink-0 flex items-center justify-center font-bold rounded-xl ${boxClass}">${boxContent}</div>
                         <div class="flex-1 min-w-0">
-                            <p class="text-sm leading-snug truncate ${nameClass}">${item.itemName}</p>
+                            <p class="text-sm leading-snug truncate ${nameClass}">${esc(item.itemName)}</p>
                             <p class="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1 flex-wrap">
-                                ${item.requestedBy ? `<span class="font-medium text-slate-500">${item.requestedBy}</span><span>·</span>` : ''}
+                                ${item.requestedBy ? `<span class="font-medium text-slate-500">${esc(item.requestedBy)}</span><span>·</span>` : ''}
                                 <span>${item.timestamp || ''}</span>
                                 ${subExtra}
                             </p>
@@ -2932,7 +2999,7 @@
             state.w2BatchEdits = {};
             state.w2PartialQty = {};
             render();
-            await syncDataToSheet();
+            if (!(await syncDataToSheet())) { await fetchInitialData(true); return; }
             sendAppLog('จัดส่งสินค้า Batch (AKRA)', `ครบ ${dispatchCount} · ไม่ครบ ${partialCount} รายการ`);
         }
 
@@ -3010,12 +3077,12 @@
                                     return `
                                     <div class="bg-white rounded-2xl border ${isRestoring ? 'border-emerald-300 shadow-emerald-100 shadow-md' : 'border-rose-200/60'} p-4 flex items-center gap-3 transition-all">
                                         <div class="flex-1 min-w-0">
-                                            <p class="font-bold text-slate-800 text-sm truncate">${item.itemName || '—'}</p>
+                                            <p class="font-bold text-slate-800 text-sm truncate">${esc(item.itemName || '—')}</p>
                                             <div class="flex items-center gap-2 mt-1 flex-wrap">
                                                 <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${isRestoring ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600'}">
                                                     ${isRestoring ? '✓ กำลังกู้คืน' : '❌ หมด'}
                                                 </span>
-                                                <span class="text-[10px] text-slate-400">${item.qty || '—'} ${item.unit || ''}</span>
+                                                <span class="text-[10px] text-slate-400">${item.qty || '—'} ${esc(item.unit || '')}</span>
                                                 ${item.dispatchTimestamp ? `<span class="text-[10px] text-slate-400">${item.dispatchTimestamp}</span>` : ''}
                                             </div>
                                         </div>
@@ -3052,12 +3119,12 @@
                 <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative">
                     <header class="bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
                         <div class="flex items-center gap-2">
-                            <button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button>
+                            <button onclick="setView('home')" aria-label="กลับหน้าหลัก" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button>
                             <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">warehouse</span> คลังสินค้า (AKRA)</h1>
                         </div>
                         <div class="flex items-center gap-2">
                             <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white" title="รีเฟรชข้อมูล"><span class="material-icons-round text-[20px]">refresh</span></button>
-                            <div class="text-[10px] font-semibold tracking-wide bg-black/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-white/10"><span class="material-icons-round text-[14px]">account_circle</span> ${currentUser || 'Demo'}</div>
+                            <div class="text-[10px] font-semibold tracking-wide bg-black/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-white/10"><span class="material-icons-round text-[14px]">account_circle</span> ${esc(currentUser || 'Demo')}</div>
                         </div>
                     </header>
 
@@ -3243,7 +3310,7 @@
                          id="bulk-row-${enc}"
                          class="p-3.5 rounded-2xl border shadow-sm mb-2.5 flex items-center justify-between gap-3 cursor-pointer transition-all ${bgClass}">
                         <div class="flex-1 min-w-0">
-                            <p class="font-bold text-brand-blue text-sm leading-snug truncate mb-1">${prod.name}</p>
+                            <p class="font-bold text-brand-blue text-sm leading-snug truncate mb-1">${esc(prod.name)}</p>
                             <div class="flex items-center flex-wrap gap-1">
                                 ${locationChip}
                                 ${parBadge}
@@ -3263,7 +3330,7 @@
             return `
                 <div class="bg-white p-3.5 rounded-2xl ${borderClass} border shadow-sm mb-2.5 flex items-center justify-between gap-3">
                     <div class="flex-1 min-w-0">
-                        <p class="font-bold text-brand-blue text-sm leading-snug truncate mb-1">${prod.name}</p>
+                        <p class="font-bold text-brand-blue text-sm leading-snug truncate mb-1">${esc(prod.name)}</p>
                         <div class="flex items-center flex-wrap gap-1">
                             ${locationChip}
                             ${parBadge}
@@ -3392,7 +3459,7 @@
                 <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative animate-fade-in pb-16">
                     <header class="bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
                         <div class="flex items-center gap-2">
-                            <button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
+                            <button onclick="setView('home')" aria-label="กลับหน้าหลัก" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
                                 <span class="material-icons-round">arrow_back</span>
                             </button>
                             <div>
@@ -3556,7 +3623,7 @@
                 if (!isNaN(cur) && par > 0) {
                     const need = Math.max(0, par - cur);
                     if (need > 0) {
-                        calcEl.innerHTML = `<span>ต้องการเติมสต๊อก:</span><span class="text-sm font-bold text-brand-orange">${need} ${prod.unit || 'หน่วย'}</span>`;
+                        calcEl.innerHTML = `<span>ต้องการเติมสต๊อก:</span><span class="text-sm font-bold text-brand-orange">${need} ${esc(prod.unit || 'หน่วย')}</span>`;
                     } else {
                         calcEl.innerHTML = `<span>ต้องการเติมสต๊อก:</span><span class="text-sm font-bold text-emerald-600">0 (พอแล้ว)</span>`;
                     }
@@ -3586,11 +3653,13 @@
             const val = parseInt(state.checkStockParInput) || 0;
             const prod = state.products.find(p => p.name === productName);
             if (!prod) { state.checkStockEditingPar = null; render(); return; }
+            let ok = false;
             try {
-                await pushProductDetails(productName, prod.floor || '', prod.location || '', val);
-                const idx = state.products.findIndex(p => p.name === productName);
-                if (idx !== -1) state.products[idx].parLevel = val;
-            } catch(e) { alert('บันทึกไม่สำเร็จ'); }
+                ok = await pushProductDetails(productName, prod.floor || '', prod.location || '', val);
+            } catch(e) { ok = false; }
+            if (!ok) { alert('บันทึก Par Level ไม่สำเร็จ ข้อมูลอาจยังไม่ถูกบันทึก กรุณาลองใหม่'); return; }
+            const idx = state.products.findIndex(p => p.name === productName);
+            if (idx !== -1) state.products[idx].parLevel = val;
             state.checkStockEditingPar = null;
             state.checkStockParInput = '';
             render();
@@ -3601,8 +3670,8 @@
             const search = value.toLowerCase().trim();
             const locObj = state.checkStockLocation;
             if (!locObj) return;
-            const locProducts = state.products.filter(p => p.location === locObj.location && p.floor === locObj.floor && p.floor !== 'NOSTK');
-            
+            const locProducts = state.products.filter(p => extractZone(p.location) === locObj.location && p.floor === locObj.floor && p.floor !== 'NOSTK');
+
             const filtered = search
                 ? locProducts.filter(p => p.name.toLowerCase().includes(search))
                 : locProducts;
@@ -3618,14 +3687,15 @@
         }
 
         async function handleCheckStockSubmit() {
+            if (await AppVersionGuard.blockIfStale()) return;
             if (state.checkStockSubmitting) return; // Prevent double submission
             
             const locObj = state.checkStockLocation;
             if (!locObj) return;
-            const loc = locObj.location;
+            const loc = locObj.location; // zone (เลขนำหน้า lock code)
             const floor = locObj.floor;
 
-            const locProducts = state.products.filter(p => p.location === loc && p.floor === floor && p.floor !== 'NOSTK');
+            const locProducts = state.products.filter(p => extractZone(p.location) === loc && p.floor === floor && p.floor !== 'NOSTK');
             const checkedProducts = locProducts.filter(p => state.checkStockEdits[p.name]?.checked);
 
             // Validation: Checked products must have a quantity input
@@ -3716,21 +3786,19 @@
                 // 1. Submit orders if any
                 if (newOrders.length > 0) {
                     state.items = [...newOrders, ...state.items];
-                    await syncDataToSheet(true); // skipHideLoading = true
+                    if (!(await syncDataToSheet(true))) { await fetchInitialData(true, true); return; }
                 }
 
-                // 2. Submit survey log
+                // 2. Submit survey log (non-fatal: รายการสั่งเบิกถูกบันทึกแล้ว)
                 showLoading('กำลังบันทึกประวัติการสำรวจ...');
-                await fetch(APPS_SCRIPT_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify({
+                try {
+                    await postMutation({
                         action: 'saveSurveyLog',
                         surveyedBy: currentUser || 'ไม่ทราบ',
-                        floor: `${floor} - ${loc}`, // Save as e.g. "2 - 3B"
+                        floor: `${floor} - โซน ${loc}`, // Save as e.g. "2 - โซน 3"
                         items: logItems
-                    })
-                });
+                    });
+                } catch(e) { console.error('SurveyLog error', e); }
 
                 // Invalidate cache
                 localStorage.removeItem('TRDAKRA_DATA');
@@ -3753,8 +3821,8 @@
                 // Show alert while loading is still covering the screen
                 const csDupNote = skippedDup.length > 0
                     ? `\n⚠️ ข้ามที่เบิกซ้ำ ${skippedDup.length} รายการ: ${skippedDup.join(', ')}` : '';
-                alert(`✅ บันทึกสต๊อกสำเร็จ!\nส่งสั่งเบิก ${newOrders.length} รายการ จากโลเคชั่น ชั้น ${floor} - ${loc}${csDupNote}`);
-                sendAppLog('ตรวจสต๊อกรายโลเคชั่น', `โลเคชั่น ชั้น ${floor} - ${loc}: ส่งเบิก ${newOrders.length} รายการ`);
+                alert(`✅ บันทึกสต๊อกสำเร็จ!\nส่งสั่งเบิก ${newOrders.length} รายการ จาก ชั้น ${floor} โซน ${loc}${csDupNote}`);
+                sendAppLog('ตรวจสต๊อกรายโซน', `ชั้น ${floor} โซน ${loc}: ส่งเบิก ${newOrders.length} รายการ`);
             } catch (err) {
                 console.error(err);
                 alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง');
@@ -3792,8 +3860,9 @@
                     <div onclick="toggleCheckStockItem(decodeURIComponent('${enc}'))"
                          class="flex justify-between items-center gap-3 p-4 cursor-pointer active:bg-indigo-50/60 transition-colors select-none">
                         <div class="flex-1 min-w-0">
-                            <h4 class="text-sm font-bold ${checked ? 'text-brand-blue' : 'text-slate-800'} leading-snug">${prod.name}</h4>
-                            <div class="flex items-center gap-1.5 mt-1.5" onclick="event.stopPropagation()">
+                            <h4 class="text-sm font-bold ${checked ? 'text-brand-blue' : 'text-slate-800'} leading-snug">${esc(prod.name)}</h4>
+                            <div class="flex items-center gap-1.5 mt-1.5 flex-wrap" onclick="event.stopPropagation()">
+                                ${prod.location ? `<span class="text-[10px] font-bold bg-brand-blue/10 text-brand-blue px-2 py-0.5 rounded-full">📍 ${esc(prod.location)}</span>` : ''}
                                 ${state.checkStockEditingPar === prod.name ? `
                                     <input type="number" min="0" value="${state.checkStockParInput}"
                                         oninput="state.checkStockParInput=this.value"
@@ -3806,7 +3875,7 @@
                                         class="text-[9px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full active:scale-95">✕</button>
                                 ` : `
                                     <span class="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
-                                        Par: ${par > 0 ? `${par} ${prod.unit}` : 'ยังไม่ตั้ง ⚠️'}
+                                        Par: ${par > 0 ? `${par} ${esc(prod.unit)}` : 'ยังไม่ตั้ง ⚠️'}
                                     </span>
                                     <button onclick="openParEdit(decodeURIComponent('${enc}'))"
                                         class="text-[9px] text-slate-400 hover:text-brand-blue transition-colors flex items-center gap-0.5">
@@ -3823,7 +3892,7 @@
                         ${par > 0 ? `
                         <div>
                             <label class="block text-[10px] font-bold text-indigo-700 uppercase tracking-wider mb-1">
-                                👉 จำนวนที่เหลืออยู่บนชั้น (${prod.unit}) <span class="text-rose-500">*</span>
+                                👉 จำนวนที่เหลืออยู่บนชั้น (${esc(prod.unit)}) <span class="text-rose-500">*</span>
                             </label>
                             <input type="number" min="0" value="${curStock}" placeholder="กรอกจำนวนคงเหลือ..."
                                 oninput="updateCheckStockStock(decodeURIComponent('${enc}'), this.value)"
@@ -3832,7 +3901,7 @@
                         <div class="text-xs font-semibold text-brand-blue flex justify-between items-center bg-indigo-50 border border-indigo-100 px-3 py-2 rounded-xl" id="calc-need-${enc}">
                             <span>ต้องการเติมสต๊อก:</span>
                             <span class="text-sm font-bold text-brand-orange">
-                                ${curStock !== '' ? `${need} ${prod.unit}` : 'รอป้อนจำนวน'}
+                                ${curStock !== '' ? `${need} ${esc(prod.unit)}` : 'รอป้อนจำนวน'}
                             </span>
                         </div>
                         ` : `
@@ -3873,8 +3942,10 @@
                 state.products.forEach(p => {
                     if (p.floor && p.floor !== 'NOSTK' && p.location) {
                         const f = p.floor;
+                        const zone = extractZone(p.location.trim());
+                        if (!zone) return;
                         if (!floorGroups[f]) floorGroups[f] = new Set();
-                        floorGroups[f].add(p.location.trim());
+                        floorGroups[f].add(zone);
                     }
                 });
 
@@ -3894,7 +3965,7 @@
                         </div>`;
                 } else {
                     floorsHtml = sortedFloors.map(f => {
-                        const locs = [...floorGroups[f]].sort((a,b) => a.localeCompare(b, undefined, {numeric: true, sensitivity: 'base'}));
+                        const zones = [...floorGroups[f]].sort((a,b) => a.localeCompare(b, undefined, {numeric: true, sensitivity: 'base'}));
                         const cleanedChecked = getCleanedCheckedLocations();
                         return `
                             <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3">
@@ -3902,20 +3973,20 @@
                                     <span class="material-icons-round text-[16px]">layers</span> ชั้น ${f}
                                 </h3>
                                 <div class="grid grid-cols-3 gap-2">
-                                    ${locs.map(loc => {
-                                        const count = state.products.filter(p => p.floor === f && p.location === loc && p.floor !== 'NOSTK').length;
-                                        const isCheckedToday = !!cleanedChecked[`${f}|${loc}`];
-                                        
-                                        const btnBg = isCheckedToday 
-                                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100/50 hover:border-emerald-300' 
+                                    ${zones.map(zone => {
+                                        const count = state.products.filter(p => p.floor === f && extractZone(p.location) === zone && p.floor !== 'NOSTK').length;
+                                        const isCheckedToday = !!cleanedChecked[`${f}|${zone}`];
+
+                                        const btnBg = isCheckedToday
+                                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100/50 hover:border-emerald-300'
                                             : 'bg-slate-50 border-slate-200 hover:border-brand-blue hover:bg-brand-blue/5 text-slate-700 hover:text-brand-blue';
-                                            
+
                                         return `
-                                            <button onclick="selectCheckStockLocation('${f}', '${loc}')"
+                                            <button onclick="selectCheckStockLocation('${f}', '${zone}')"
                                                 class="py-3 px-2 border rounded-xl text-center active:scale-95 transition-all flex flex-col justify-center items-center gap-1 ${btnBg}">
                                                 <span class="text-xs font-bold tracking-wide flex items-center gap-1">
                                                     ${isCheckedToday ? '<span class="material-icons-round text-[12px] text-emerald-600">check_circle</span>' : ''}
-                                                    ${loc}
+                                                    โซน ${esc(zone)}
                                                 </span>
                                                 <span class="text-[9px] ${isCheckedToday ? 'text-emerald-600/70' : 'text-slate-400'} font-medium">${count} รายการ</span>
                                             </button>`;
@@ -3929,14 +4000,14 @@
                     <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col">
                         <header class="bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
                             <div class="flex items-center gap-2">
-                                <button onclick="setView('home')" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
+                                <button onclick="setView('home')" aria-label="กลับหน้าหลัก" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
                                     <span class="material-icons-round">arrow_back</span>
                                 </button>
                                 <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5">
-                                    <span class="material-icons-round text-[20px]">fact_check</span> ใบตรวจเช็คสต๊อก (รายโลเคชั่น)
+                                    <span class="material-icons-round text-[20px]">fact_check</span> ใบตรวจเช็คสต๊อก (รายโซน)
                                 </h1>
                             </div>
-                            <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
+                            <button onclick="fetchInitialData(true)" aria-label="รีเฟรชข้อมูล" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
                                 <span class="material-icons-round text-[20px]">refresh</span>
                             </button>
                         </header>
@@ -3946,7 +4017,7 @@
                                 <div>
                                     <h4 class="text-xs font-bold text-indigo-800">ขั้นตอนการเช็คของหน้างาน</h4>
                                     <p class="text-[10px] text-indigo-600 mt-1 leading-relaxed">
-                                        1. จิ้มเลือกโลเคชั่นที่จะนับสต๊อก<br>
+                                        1. จิ้มเลือกโซนที่จะนับสต๊อก<br>
                                         2. ติ๊กเฉพาะสินค้าที่มีสต๊อกเหลือน้อยควรเติม (ตัวที่ไม่ติ๊กจะถูกข้าม/บันทึกว่าสต๊อกพอแล้วอัตโนมัติ)<br>
                                         3. กรอกจำนวนจริงที่เหลืออยู่บนชั้นวาง จากนั้นกดยืนยันเพื่อส่งใบรายงาน
                                     </p>
@@ -3958,7 +4029,7 @@
                             </button>
                             
                             <div class="flex justify-between items-center px-1 mt-6">
-                                <h2 class="text-sm font-bold text-slate-800">📍 แผนผังโลเคชั่น (จิ้มเพื่อเช็ค)</h2>
+                                <h2 class="text-sm font-bold text-slate-800">📍 เลือกโซน (จิ้มเพื่อเช็ค)</h2>
                                 ${missingCount > 0 ? `
                                     <span onclick="setView('location')" class="text-[9px] font-bold text-rose-500 bg-rose-50 border border-rose-100 rounded-full px-2 py-0.5 cursor-pointer hover:bg-rose-100 transition-colors">
                                         ⚠️ ไม่มีโลเคชั่น ${missingCount} รายการ
@@ -3972,9 +4043,9 @@
             } else {
                 // ─── 2. หน้าเช็คสินค้าในโลเคชั่นที่เลือก ───
                 const locObj = state.checkStockLocation;
-                const loc = locObj.location;
+                const loc = locObj.location; // ตอนนี้ loc เก็บ "zone" (เลขนำหน้า lock code)
                 const floor = locObj.floor;
-                const locProducts = state.products.filter(p => p.location === loc && p.floor === floor && p.floor !== 'NOSTK');
+                const locProducts = state.products.filter(p => extractZone(p.location) === loc && p.floor === floor && p.floor !== 'NOSTK');
                 const search = (state.checkStockSearch || '').toLowerCase().trim();
                 
                 const filteredProducts = search
@@ -3986,24 +4057,24 @@
                 return `
                     <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col">
                         <header class="bg-brand-blue text-white p-4 flex items-center gap-2 sticky top-0 z-20 shadow-md">
-                            <button onclick="state.checkStockLocation=null; render()" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
+                            <button onclick="state.checkStockLocation=null; render()" aria-label="ย้อนกลับ" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
                                 <span class="material-icons-round">arrow_back</span>
                             </button>
                             <div class="flex-1 min-w-0">
-                                <h1 class="text-[16px] font-bold">📍 ชั้น ${floor} - โลเคชั่น: ${loc}</h1>
+                                <h1 class="text-[16px] font-bold">📍 ชั้น ${esc(floor)} - โซน ${esc(loc)}</h1>
                                 <p class="text-[11px] text-white/70">เช็คสต๊อกทั้งหมด ${locProducts.length} รายการ</p>
                             </div>
                         </header>
                         
                         <div class="bg-white sticky top-[68px] z-10 border-b border-slate-100 shadow-sm px-4 py-3">
-                            <input type="text" value="${state.checkStockSearch}" placeholder="🔍 ค้นหาสินค้าในโลเคชั่น ${loc}..."
+                            <input type="text" value="${esc(state.checkStockSearch)}" placeholder="🔍 ค้นหาสินค้าในโซน ${esc(loc)}..."
                                 oninput="updateCheckStockSearch(this.value)"
                                 class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
                         </div>
 
                         <main class="flex-1 overflow-y-auto p-4 pb-36 animate-fade-in" id="check-stock-list">
                             ${filteredProducts.length === 0
-                                ? `<p class="text-center text-slate-400 py-12 text-sm">${search ? 'ไม่พบสินค้าตามที่ค้นหา' : 'ไม่มีสินค้าในโลเคชั่นนี้'}</p>`
+                                ? `<p class="text-center text-slate-400 py-12 text-sm">${search ? 'ไม่พบสินค้าตามที่ค้นหา' : 'ไม่มีสินค้าในโซนนี้'}</p>`
                                 : filteredProducts.map(renderCheckStockRow).join('')
                             }
                         </main>
@@ -4153,7 +4224,7 @@
                             <span class="material-icons-round text-white/55 text-[16px]">person</span>
                         </div>
                         <div class="sidebar-user-detail min-w-0">
-                            <p class="text-[12px] font-bold text-white/80 truncate">${user.name || user.id || '—'}</p>
+                            <p class="text-[12px] font-bold text-white/80 truncate">${esc(user.name || user.id || '—')}</p>
                             <p class="text-[10px] text-white/35">${(user.roles || []).slice(0,2).join(' · ')}</p>
                         </div>
                     </div>` : `<p class="text-[10px] text-white/25 text-center py-1">Demo</p>`}
@@ -4203,9 +4274,119 @@
             return true;
         }
 
+        /* ===== AKRA Global Version Guard (shared inline, Conductor plan 20260611-003) =====
+           Watches version.json after load (interval/focus/visibility/pageshow). On mismatch it
+           shows a non-blocking reload banner; a blocking modal + abort only fires before a
+           mutation via blockIfStale(). Reads listed in readActions stay allowed. */
+        const AppVersionGuard = (function () {
+            var cfg = { current: '', readActions: [] };
+            var stale = false, started = false;
+            var POLL_MS = 5 * 60 * 1000;
+
+            function reload() {
+                var url = new URL(window.location.href);
+                url.searchParams.set('update', Date.now());
+                window.location.replace(url.toString());
+            }
+            function injectStyles() {
+                if (document.getElementById('avg-style')) return;
+                var s = document.createElement('style');
+                s.id = 'avg-style';
+                s.textContent = '#avg-banner{position:fixed;top:0;left:0;right:0;z-index:2147483646;background:#E35205;color:#fff;font:600 14px/1.4 system-ui,sans-serif;padding:10px 14px;display:flex;gap:12px;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.2)}#avg-banner button{cursor:pointer;border:0;border-radius:8px;font-weight:700;padding:8px 16px;background:#fff;color:#E35205}#avg-modal{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px}#avg-modal .avg-card{background:#fff;color:#1f2937;max-width:380px;width:100%;border-radius:16px;padding:24px;text-align:center;font:400 15px/1.5 system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.3)}#avg-modal .avg-card h2{font-size:18px;font-weight:800;margin:0 0 8px}#avg-modal .avg-card button{cursor:pointer;border:0;margin-top:16px;background:#E35205;color:#fff;width:100%;padding:12px;border-radius:8px;font-weight:700}';
+                document.head.appendChild(s);
+            }
+            function showBanner() {
+                injectStyles();
+                if (document.getElementById('avg-banner')) return;
+                var bar = document.createElement('div');
+                bar.id = 'avg-banner';
+                bar.setAttribute('role', 'status');
+                bar.setAttribute('aria-live', 'polite');
+                var msg = document.createElement('span');
+                msg.textContent = 'มีเวอร์ชันใหม่ของระบบ กรุณารีโหลดเพื่ออัปเดต';
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.textContent = 'รีโหลด';
+                btn.addEventListener('click', reload);
+                bar.appendChild(msg);
+                bar.appendChild(btn);
+                document.body.appendChild(bar);
+            }
+            function showModal() {
+                injectStyles();
+                var existing = document.getElementById('avg-modal');
+                if (existing) { existing.querySelector('button').focus(); return; }
+                var m = document.createElement('div');
+                m.id = 'avg-modal';
+                m.setAttribute('role', 'alertdialog');
+                m.setAttribute('aria-modal', 'true');
+                m.setAttribute('aria-labelledby', 'avg-modal-title');
+                var card = document.createElement('div');
+                card.className = 'avg-card';
+                var h = document.createElement('h2');
+                h.id = 'avg-modal-title';
+                h.textContent = 'ต้องอัปเดตระบบ';
+                var p = document.createElement('div');
+                p.setAttribute('aria-live', 'assertive');
+                p.textContent = 'พบเวอร์ชันใหม่ ไม่สามารถบันทึกจากหน้าเดิมได้ กรุณารีโหลดก่อนทำรายการ';
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.textContent = 'รีโหลดเดี๋ยวนี้';
+                btn.addEventListener('click', reload);
+                card.appendChild(h);
+                card.appendChild(p);
+                card.appendChild(btn);
+                m.appendChild(card);
+                document.body.appendChild(m);
+                btn.focus();
+            }
+            async function fetchRemote() {
+                try {
+                    var res = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+                    if (!res.ok) return null;
+                    var c = await res.json();
+                    return (c && c.version) ? String(c.version) : null;
+                } catch (e) { console.warn('Version check skipped:', e); return null; }
+            }
+            function markStale() {
+                if (stale) return;
+                stale = true;
+                showBanner();
+            }
+            async function check() {
+                if (stale) return false;
+                var remote = await fetchRemote();
+                if (remote && remote !== cfg.current) { markStale(); return false; }
+                return true;
+            }
+            // Returns true when the caller's mutation should be BLOCKED. Awaits a fresh check
+            // right before a save to close the polling race window (see plan Risk note).
+            async function blockIfStale(action) {
+                if (action && cfg.readActions.indexOf(action) !== -1) return false;
+                if (!stale) await check();
+                if (!stale) return false;
+                showModal();
+                return true;
+            }
+            function start(options) {
+                cfg.current = options.current;
+                cfg.readActions = options.readActions || [];
+                if (started) return;
+                started = true;
+                setInterval(check, POLL_MS);
+                document.addEventListener('visibilitychange', function () {
+                    if (document.visibilityState === 'visible') check();
+                });
+                window.addEventListener('focus', check);
+                window.addEventListener('pageshow', function (e) { if (e.persisted) check(); });
+            }
+            return { start: start, check: check, blockIfStale: blockIfStale, isStale: function () { return stale; }, reloadNow: reload };
+        })();
+
         window.onload = async function() {
             const isVersionOk = await checkAppVersion();
             if (isVersionOk) {
+                AppVersionGuard.start({ current: CURRENT_VERSION, readActions: [] });
                 ssoInit();
             }
         };
