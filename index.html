@@ -166,7 +166,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260612.06";
+        const CURRENT_VERSION = "20260612.07";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -547,6 +547,21 @@
             return m ? m[1] : location;
         }
 
+        function normalizeLocationCode(location) {
+            let code = String(location || '').trim();
+            if (/^W\d+-\d+F-/.test(code)) code = code.split('-').pop();
+            return code;
+        }
+
+        function compareCheckStockProducts(a, b) {
+            const locCmp = normalizeLocationCode(a.location).localeCompare(
+                normalizeLocationCode(b.location),
+                undefined,
+                { numeric: true, sensitivity: 'base' }
+            );
+            if (locCmp !== 0) return locCmp;
+            return String(a.name || '').localeCompare(String(b.name || ''), 'th', { numeric: true, sensitivity: 'base' });
+        }
         // Compose full display code e.g. floor="2", location="2B" → "W1-2F-2B"
         function displayLocationCode(prod) {
             if (!prod || !prod.floor) return null;
@@ -3670,7 +3685,9 @@
             const search = value.toLowerCase().trim();
             const locObj = state.checkStockLocation;
             if (!locObj) return;
-            const locProducts = state.products.filter(p => extractZone(p.location) === locObj.location && p.floor === locObj.floor && p.floor !== 'NOSTK');
+            const locProducts = state.products
+                .filter(p => extractZone(p.location) === locObj.location && p.floor === locObj.floor && p.floor !== 'NOSTK')
+                .sort(compareCheckStockProducts);
 
             const filtered = search
                 ? locProducts.filter(p => p.name.toLowerCase().includes(search))
@@ -3695,7 +3712,9 @@
             const loc = locObj.location; // zone (เลขนำหน้า lock code)
             const floor = locObj.floor;
 
-            const locProducts = state.products.filter(p => extractZone(p.location) === loc && p.floor === floor && p.floor !== 'NOSTK');
+            const locProducts = state.products
+                .filter(p => extractZone(p.location) === loc && p.floor === floor && p.floor !== 'NOSTK')
+                .sort(compareCheckStockProducts);
             const checkedProducts = locProducts.filter(p => state.checkStockEdits[p.name]?.checked);
 
             // Validation: Checked products must have a quantity input
@@ -4045,7 +4064,9 @@
                 const locObj = state.checkStockLocation;
                 const loc = locObj.location; // ตอนนี้ loc เก็บ "zone" (เลขนำหน้า lock code)
                 const floor = locObj.floor;
-                const locProducts = state.products.filter(p => extractZone(p.location) === loc && p.floor === floor && p.floor !== 'NOSTK');
+                const locProducts = state.products
+                    .filter(p => extractZone(p.location) === loc && p.floor === floor && p.floor !== 'NOSTK')
+                    .sort(compareCheckStockProducts);
                 const search = (state.checkStockSearch || '').toLowerCase().trim();
                 
                 const filteredProducts = search
