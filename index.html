@@ -166,7 +166,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260612.07";
+        const CURRENT_VERSION = "20260613.02";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -309,6 +309,9 @@
             w2Tab: 'tasks',
             w2BatchEdits: {},
             w2PartialQty: {},
+            historySearch: '',
+            historySort: 'request',
+            historyDir: 'desc',
             dashboardFilter: 'week',
             items: [],
             products: [],
@@ -1896,12 +1899,94 @@
                 </div>`;
         }
 
-        function renderHistoryList(role) {
-            const historyItems = state.items.filter(i => ['จัดส่งแล้ว', 'จัดส่งไม่ครบ', 'ยกเลิกรายการ'].includes(i.status));
-            if (historyItems.length === 0) return renderEmptyState('ไม่มีประวัติย้อนหลัง', 'history_toggle_off');
+        function getFilteredHistory() {
+            let items = state.items.filter(i => ['จัดส่งแล้ว', 'จัดส่งไม่ครบ', 'ยกเลิกรายการ'].includes(i.status));
+            const q = (state.historySearch || '').toLowerCase().trim();
+            if (q) items = items.filter(i =>
+                String(i.itemName || '').toLowerCase().includes(q) ||
+                String(i.id || '').toLowerCase().includes(q));
+            const dir = state.historyDir === 'asc' ? 1 : -1;   // asc = เก่าไปใหม่, desc = ใหม่ไปเก่า
+            if (state.historySort === 'dispatch') {
+                items = items.slice().sort((a, b) => {
+                    const da = a.dispatchTimestamp ? parseFormattedDate(a.dispatchTimestamp) : null;
+                    const db = b.dispatchTimestamp ? parseFormattedDate(b.dispatchTimestamp) : null;
+                    if (!da && !db) return 0;
+                    if (!da) return 1;   // missing dispatch date always sorts last
+                    if (!db) return -1;
+                    return (da - db) * dir;
+                });
+            } else {
+                items = items.slice().sort((a, b) => {
+                    const da = a.rawDate ? new Date(a.rawDate) : new Date(0);
+                    const db = b.rawDate ? new Date(b.rawDate) : new Date(0);
+                    return (da - db) * dir;
+                });
+            }
+            return items;
+        }
 
-            return `<div class="space-y-4">
-                ${historyItems.map(item => `
+        function refreshHistoryList() {
+            const listEl = document.getElementById('history-list');
+            if (listEl) listEl.innerHTML = renderHistoryCards(getFilteredHistory(), state._historyRole || 'w1');
+        }
+
+        function historyDirBtnInner() {
+            const asc = state.historyDir === 'asc';
+            return `<span class="material-icons-round text-[16px]">${asc ? 'arrow_upward' : 'arrow_downward'}</span>${asc ? 'เก่า → ใหม่' : 'ใหม่ → เก่า'}`;
+        }
+
+        function updateHistorySearch(value) {
+            state.historySearch = value;
+            refreshHistoryList();
+        }
+
+        function setHistorySort(mode) {
+            state.historySort = mode;
+            refreshHistoryList();
+        }
+
+        function toggleHistoryDir() {
+            state.historyDir = state.historyDir === 'asc' ? 'desc' : 'asc';
+            const btn = document.getElementById('history-dir-btn');
+            if (btn) btn.innerHTML = historyDirBtnInner();
+            refreshHistoryList();
+        }
+
+        function renderHistoryList(role) {
+            state._historyRole = role;
+            const allHistory = state.items.filter(i => ['จัดส่งแล้ว', 'จัดส่งไม่ครบ', 'ยกเลิกรายการ'].includes(i.status));
+            if (allHistory.length === 0) return renderEmptyState('ไม่มีประวัติย้อนหลัง', 'history_toggle_off');
+
+            return `<div class="space-y-3">
+                <div class="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm flex flex-col sm:flex-row gap-2.5">
+                    <div class="flex-1">
+                        <label for="history-search" class="block text-[11px] font-semibold text-slate-500 mb-1">ค้นหาสินค้า</label>
+                        <input id="history-search" type="text" value="${esc(state.historySearch)}" oninput="updateHistorySearch(this.value)"
+                            placeholder="🔍 ชื่อสินค้า หรือ ID..."
+                            class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
+                    </div>
+                    <div class="sm:w-44">
+                        <label for="history-sort" class="block text-[11px] font-semibold text-slate-500 mb-1">เรียงตาม</label>
+                        <select id="history-sort" onchange="setHistorySort(this.value)"
+                            class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
+                            <option value="request" ${state.historySort !== 'dispatch' ? 'selected' : ''}>วันที่เบิก</option>
+                            <option value="dispatch" ${state.historySort === 'dispatch' ? 'selected' : ''}>วันที่จัดส่ง</option>
+                        </select>
+                    </div>
+                    <div class="sm:w-36">
+                        <label class="block text-[11px] font-semibold text-slate-500 mb-1">ทิศทาง</label>
+                        <button id="history-dir-btn" type="button" onclick="toggleHistoryDir()"
+                            aria-label="สลับทิศทางการเรียง เก่าไปใหม่ หรือ ใหม่ไปเก่า"
+                            class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-600 flex items-center justify-center gap-1 hover:border-brand-blue transition-all active:scale-[0.98]">${historyDirBtnInner()}</button>
+                    </div>
+                </div>
+                <div id="history-list" class="space-y-4">${renderHistoryCards(getFilteredHistory(), role)}</div>
+            </div>`;
+        }
+
+        function renderHistoryCards(historyItems, role) {
+            if (historyItems.length === 0) return `<p class="text-center text-slate-400 py-10 text-sm">ไม่พบรายการตามที่ค้นหา</p>`;
+            return historyItems.map(item => `
                     <div class="bg-white p-5 rounded-[1.5rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100 opacity-95 hover:opacity-100 transition-opacity">
                         <div class="flex justify-between items-start mb-3">
                             <div class="pr-2">
@@ -1983,7 +2068,7 @@
                         </div>
                         ${item.w2Note ? `<p class="text-[11px] mt-3 text-amber-700 bg-amber-50 px-3 py-2 rounded-xl border border-amber-100/50"><span class="font-bold">โน้ต:</span> ${esc(item.w2Note)}</p>` : ''}
                     </div>
-                `).join('')}</div>`;
+                `).join('');
         }
 
         // --- Render Dashboard (สถิติวิเคราะห์เชิงลึก AI) ---
@@ -2617,7 +2702,7 @@
                     icon: 'storefront',
                     color: 'bg-brand-blue',
                     shadow: 'shadow-brand-blue/20',
-                    title: 'W1 · TRD',
+                    title: 'TRD',
                     subtitle: 'พนักงานหน้าร้าน',
                     desc: 'สร้างใบเบิกสินค้า ติดตามสถานะ',
                     badge: pendingW1 > 0 ? `<span class="inline-flex items-center gap-1 bg-amber-100 text-amber-700 text-xs font-bold px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>รอจัด ${pendingW1}</span>` : `<span class="text-xs text-slate-400">ไม่มีรายการค้าง</span>`,
@@ -2627,7 +2712,7 @@
                     icon: 'warehouse',
                     color: 'bg-brand-blue',
                     shadow: 'shadow-brand-blue/20',
-                    title: 'W2 · AKRA',
+                    title: 'AKRA',
                     subtitle: 'พนักงานคลังสินค้า',
                     desc: 'จัดและยืนยันการส่งสินค้า',
                     badge: `<span class="text-xs text-slate-400">สินค้า ${totalProducts} รายการ</span>`,
@@ -4182,8 +4267,8 @@
             const col  = state.sidebarCollapsed;
             const navItems = [
                 { view: 'home',        icon: 'home',           label: 'หน้าหลัก',    sub: 'Dashboard' },
-                { view: 'w1',          icon: 'shopping_cart',  label: 'เบิกสินค้า',  sub: 'W1 · TRD' },
-                { view: 'w2',          icon: 'local_shipping', label: 'จัดส่งสินค้า', sub: 'W2 · AKRA' },
+                { view: 'w1',          icon: 'shopping_cart',  label: 'เบิกสินค้า',  sub: 'TRD' },
+                { view: 'w2',          icon: 'local_shipping', label: 'จัดส่งสินค้า', sub: 'AKRA' },
                 { view: 'dashboard',   icon: 'bar_chart',      label: 'Analytics',   sub: 'รายงาน' },
                 { view: 'location',    icon: 'place',          label: 'จัดโลเคชั่น', sub: 'Location' },
                 { view: 'check_stock', icon: 'inventory_2',    label: 'ตรวจสต็อก',  sub: 'Check Stock' },
