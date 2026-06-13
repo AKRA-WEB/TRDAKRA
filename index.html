@@ -166,7 +166,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260613.03";
+        const CURRENT_VERSION = "20260613.04";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -351,7 +351,10 @@
             calendarWeekOffset: 0,
             calendarSelectedDate: null,
             surveyLogs: null,
-            surveyLogsLoading: false
+            surveyLogsLoading: false,
+            // Product deep-dive analytics
+            productSearch: '',
+            productSelected: null
         };
 
         function showLoading(text = 'กำลังทำงาน...') {
@@ -2137,6 +2140,7 @@
 
             const TABS = [
                 { id: 'summary',  label: 'สรุป',       icon: 'bar_chart' },
+                { id: 'product',  label: 'สินค้า',      icon: 'inventory_2' },
                 { id: 'trend',    label: 'Trend',       icon: 'calendar_month' },
                 { id: 'problems', label: 'หมด/ยกเลิก', icon: 'warning_amber' },
                 { id: 'survey',   label: 'Survey',      icon: 'fact_check' }
@@ -2177,6 +2181,7 @@
 
                     <main class="flex-1 overflow-y-auto p-5 pb-24 space-y-6">
                         ${state.dashboardTab === 'summary'  ? renderDashboardSummary(dispatchedItems, state.items, startDate) :
+                          state.dashboardTab === 'product'  ? renderDashboardProduct() :
                           state.dashboardTab === 'trend'    ? renderDashboardTrend() :
                           state.dashboardTab === 'problems' ? renderDashboardProblems(state.items, startDate) :
                           renderDashboardSurvey()}
@@ -2585,6 +2590,344 @@
                             `).join('')}
                         </div>`
                     }
+                </div>
+            `;
+        }
+
+        // ── Product deep-dive analytics ───────────────────────────────
+        // จัดส่งสำเร็จ (ใช้คำนวณยอดจัดส่งจริง + fulfillment rate)
+        const FULFILLED_STATUSES = ['จัดส่งแล้ว', 'รับสินค้าแล้ว', 'จัดส่งไม่ครบ'];
+
+        // วันที่ของแต่ละรายการ: วันที่เบิก (request) และวันที่จัดส่ง (dispatch)
+        function productRecordDates(item) {
+            const reqDate = item.rawDate ? new Date(item.rawDate) : null;
+            const dispDate = item.dispatchTimestamp ? parseFormattedDate(item.dispatchTimestamp) : null;
+            return { reqDate, dispDate };
+        }
+
+        // สินค้าเคลื่อนไหวเร็วในช่วง N วันล่าสุด (จัดตามยอดจัดส่งจริง)
+        function getFastMovingProducts(days) {
+            const start = Date.now() - days * 86400000;
+            const map = {};
+            state.items.forEach(item => {
+                if (!FULFILLED_STATUSES.includes(item.status)) return;
+                const { reqDate, dispDate } = productRecordDates(item);
+                const fd = dispDate || reqDate;
+                if (!fd || fd.getTime() < start) return;
+                const name = (item.itemName || '').trim();
+                if (!name) return;
+                if (!map[name]) map[name] = { name, qty: 0, bills: 0 };
+                map[name].qty += parseInt(item.receiveQty) || 0;
+                map[name].bills++;
+            });
+            return Object.values(map).sort((a, b) => b.qty - a.qty);
+        }
+
+        // รวมข้อมูลเชิงลึกของสินค้า 1 รายการ (จับคู่ชื่อแบบ exact match)
+        function computeProductAnalytics(name) {
+            const target = (name || '').trim();
+            const records = state.items.filter(i => (i.itemName || '').trim() === target);
+            const now = Date.now();
+            const DAY = 86400000;
+
+            const agg = {
+                name: target,
+                unit: getProductUnitClient(target),
+                details: getProductDetails(target),
+                totalBills: records.length,
+                totalRequested: 0,       // ยอดขอเบิกรวมทุกบิล (ทุกสถานะ)
+                requestedFulfilled: 0,   // ยอดขอเบิกของบิลที่จัดส่งแล้ว (ตัวหารของ rate)
+                totalFulfilled: 0,       // ยอดจัดส่งจริง (ตัวตั้งของ rate)
+                fulfilledBills: 0,
+                latestRequest: null,
+                latestDispatch: null,
+                pending: [],
+                timeline: [],
+                win: {}
+            };
+            [3, 7].forEach(d => agg.win[d] = { reqQty: 0, fulQty: 0, reqQtyPrev: 0, fulQtyPrev: 0, fulBills: 0 });
+
+            records.forEach(item => {
+                const reqQty = parseInt(item.requestQty) || 0;
+                const recQty = parseInt(item.receiveQty) || 0;
+                const { reqDate, dispDate } = productRecordDates(item);
+                const isFulfilled = FULFILLED_STATUSES.includes(item.status);
+                const isPending = ACTIVE_W1_STATUSES.includes(item.status);
+
+                agg.totalRequested += reqQty;
+                if (isFulfilled) {
+                    agg.requestedFulfilled += reqQty;
+                    agg.totalFulfilled += recQty;
+                    agg.fulfilledBills++;
+                    if (dispDate && (!agg.latestDispatch || dispDate > agg.latestDispatch)) agg.latestDispatch = dispDate;
+                }
+                if (reqDate && (!agg.latestRequest || reqDate > agg.latestRequest)) agg.latestRequest = reqDate;
+                if (isPending) agg.pending.push({ id: item.id, reqQty, requestedBy: item.requestedBy, status: item.status, timestamp: item.timestamp });
+
+                agg.timeline.push({
+                    id: item.id, status: item.status, requestedBy: item.requestedBy,
+                    reqQty, recQty, reqDate, dispDate,
+                    timestamp: item.timestamp, dispatchTimestamp: item.dispatchTimestamp,
+                    shortage: isFulfilled ? Math.max(0, reqQty - recQty) : 0
+                });
+
+                [3, 7].forEach(d => {
+                    const w = agg.win[d];
+                    const curStart = now - d * DAY;
+                    const prevStart = now - 2 * d * DAY;
+                    if (reqDate) {
+                        const t = reqDate.getTime();
+                        if (t >= curStart) w.reqQty += reqQty;
+                        else if (t >= prevStart) w.reqQtyPrev += reqQty;
+                    }
+                    if (isFulfilled) {
+                        const fd = dispDate || reqDate;
+                        if (fd) {
+                            const t = fd.getTime();
+                            if (t >= curStart) { w.fulQty += recQty; w.fulBills++; }
+                            else if (t >= prevStart) w.fulQtyPrev += recQty;
+                        }
+                    }
+                });
+            });
+
+            agg.timeline.sort((a, b) => (b.reqDate ? b.reqDate.getTime() : 0) - (a.reqDate ? a.reqDate.getTime() : 0));
+            agg.fulfillmentRate = agg.requestedFulfilled > 0
+                ? Math.round(agg.totalFulfilled / agg.requestedFulfilled * 100)
+                : (agg.totalFulfilled > 0 ? 100 : 0);
+            agg.avgPerBill = agg.fulfilledBills > 0 ? Math.round(agg.totalFulfilled / agg.fulfilledBills) : 0;
+            agg.pendingQty = agg.pending.reduce((s, p) => s + p.reqQty, 0);
+            agg.daysSinceDispatch = agg.latestDispatch ? Math.floor((now - agg.latestDispatch.getTime()) / DAY) : null;
+            return agg;
+        }
+
+        function updateProductSearch(value) {
+            state.productSearch = value;
+            const el = document.getElementById('product-search-results');
+            if (el) el.innerHTML = renderProductLanding();
+        }
+        function productNameJsArg(name) {
+            return attr(JSON.stringify(String(name || '')));
+        }
+        function selectAnalyticsProduct(name) {
+            state.productSelected = String(name || '');
+            render();
+        }
+        function clearAnalyticsProduct() {
+            state.productSelected = null;
+            render();
+        }
+
+        function renderDashboardProduct() {
+            if (state.productSelected) return renderProductDetail(computeProductAnalytics(state.productSelected));
+
+            return `
+                <div class="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm">
+                    <label for="product-search" class="block text-[11px] font-semibold text-slate-500 mb-1">ค้นหาสินค้า</label>
+                    <input id="product-search" type="text" value="${esc(state.productSearch)}" oninput="updateProductSearch(this.value)"
+                        placeholder="🔍 พิมพ์ชื่อสินค้า เช่น แป้งห่าน..."
+                        class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
+                </div>
+                <div id="product-search-results">${renderProductLanding()}</div>
+            `;
+        }
+
+        // landing: ถ้ามีคำค้นหา โชว์ผลค้นหา ไม่งั้นโชว์สินค้าเคลื่อนไหวเร็ว 3 วัน
+        function renderProductLanding() {
+            const q = (state.productSearch || '').toLowerCase().trim();
+            const itemNames = state.items.map(i => (i.itemName || '').trim());
+            const productNames = state.products.map(p => ((p && typeof p === 'object') ? (p.name || p.itemName) : p || '').trim());
+            const names = [...new Set([...itemNames, ...productNames].filter(Boolean))];
+
+            if (q) {
+                const matches = names.filter(n => n.toLowerCase().includes(q)).sort().slice(0, 30);
+                if (matches.length === 0) return renderEmptyState('ไม่พบสินค้าที่ตรงกับคำค้นหา', 'search_off');
+                return `<div class="bg-white rounded-[1.5rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100 divide-y divide-slate-50 mt-4">
+                    ${matches.map(n => `
+                        <button onclick="selectAnalyticsProduct(${productNameJsArg(n)})"
+                            class="w-full text-left p-3 flex items-center gap-3 hover:bg-slate-50 active:bg-slate-100 transition-colors">
+                            <span class="material-icons-round text-brand-blue/60 text-[18px]">inventory_2</span>
+                            <span class="text-sm font-semibold text-slate-700 flex-1 truncate">${esc(n)}</span>
+                            <span class="material-icons-round text-slate-300 text-[18px]">chevron_right</span>
+                        </button>
+                    `).join('')}
+                </div>`;
+            }
+
+            const fast = getFastMovingProducts(3).slice(0, 10);
+            return `
+                <h3 class="text-sm font-bold text-brand-blue mt-5 mb-3 flex items-center gap-2 px-1">
+                    <span class="material-icons-round text-brand-orange text-[18px]">local_fire_department</span> เคลื่อนไหวเร็วสุด (3 วันล่าสุด)
+                </h3>
+                ${fast.length === 0 ? renderEmptyState('ยังไม่มีการจัดส่งใน 3 วันล่าสุด', 'inventory_2') : `
+                    <div class="bg-white rounded-[1.5rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100 divide-y divide-slate-50">
+                        ${fast.map((p, idx) => `
+                            <button onclick="selectAnalyticsProduct(${productNameJsArg(p.name)})"
+                                class="w-full text-left p-3 flex items-center gap-3 hover:bg-slate-50 active:bg-slate-100 transition-colors">
+                                <div class="w-7 h-7 rounded-full bg-brand-blue/10 text-brand-blue flex items-center justify-center font-bold text-xs flex-shrink-0">${idx + 1}</div>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-sm font-semibold text-slate-800 truncate">${esc(p.name)}</p>
+                                    <p class="text-[10px] text-slate-400">${p.bills} บิลจัดส่ง</p>
+                                </div>
+                                <span class="text-xs font-bold text-brand-orange bg-brand-orange/10 px-2 py-0.5 rounded-lg">${p.qty.toLocaleString()}</span>
+                            </button>
+                        `).join('')}
+                    </div>
+                `}
+            `;
+        }
+
+        // trend badge เทียบช่วงปัจจุบันกับช่วงก่อนหน้าที่เท่ากัน
+        function productTrendBadge(cur, prev) {
+            if (prev === 0 && cur === 0) return `<span class="text-[10px] text-slate-400">—</span>`;
+            if (prev === 0) return `<span class="text-[10px] font-bold text-emerald-600 inline-flex items-center"><span class="material-icons-round text-[12px]">arrow_upward</span>ใหม่</span>`;
+            const pct = Math.round((cur - prev) / prev * 100);
+            if (pct === 0) return `<span class="text-[10px] text-slate-400 inline-flex items-center"><span class="material-icons-round text-[12px]">remove</span>0%</span>`;
+            const up = pct > 0;
+            return `<span class="text-[10px] font-bold ${up ? 'text-emerald-600' : 'text-rose-600'} inline-flex items-center"><span class="material-icons-round text-[12px]">${up ? 'arrow_upward' : 'arrow_downward'}</span>${Math.abs(pct)}%</span>`;
+        }
+
+        function renderProductDetail(a) {
+            const fmtDate = d => d ? `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear() + 543}` : '-';
+            const unit = a.unit || 'หน่วย';
+
+            if (a.totalBills === 0) {
+                return `
+                    <button onclick="clearAnalyticsProduct()" class="mb-4 text-xs font-semibold text-brand-blue inline-flex items-center gap-1">
+                        <span class="material-icons-round text-[16px]">arrow_back</span> เลือกสินค้าอื่น
+                    </button>
+                    ${renderEmptyState('ไม่มีประวัติของสินค้านี้', 'inventory_2')}
+                `;
+            }
+
+            const fulfillBg = a.fulfillmentRate >= 90 ? 'bg-emerald-500' : a.fulfillmentRate >= 70 ? 'bg-amber-500' : 'bg-rose-500';
+            const dispBg = a.daysSinceDispatch === null ? 'bg-slate-400'
+                : a.daysSinceDispatch <= 3 ? 'bg-emerald-500'
+                : a.daysSinceDispatch <= 7 ? 'bg-lime-500'
+                : a.daysSinceDispatch <= 14 ? 'bg-amber-500' : 'bg-rose-500';
+            const d = a.details || {};
+
+            const windowCard = (days, w) => `
+                <div class="bg-white p-4 rounded-[1.5rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xs font-bold text-brand-blue">${days} วันล่าสุด</span>
+                        <span class="text-[10px] text-slate-400">${w.fulBills} บิลจัดส่ง</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <p class="text-[10px] text-slate-400 font-semibold mb-0.5">ขอเบิก</p>
+                            <div class="flex items-end gap-1.5">
+                                <p class="text-lg font-bold text-slate-700 leading-none">${w.reqQty.toLocaleString()}</p>
+                                ${productTrendBadge(w.reqQty, w.reqQtyPrev)}
+                            </div>
+                        </div>
+                        <div>
+                            <p class="text-[10px] text-slate-400 font-semibold mb-0.5">จัดส่งจริง</p>
+                            <div class="flex items-end gap-1.5">
+                                <p class="text-lg font-bold text-brand-orange leading-none">${w.fulQty.toLocaleString()}</p>
+                                ${productTrendBadge(w.fulQty, w.fulQtyPrev)}
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+
+            return `
+                <button onclick="clearAnalyticsProduct()" class="text-xs font-semibold text-brand-blue inline-flex items-center gap-1">
+                    <span class="material-icons-round text-[16px]">arrow_back</span> เลือกสินค้าอื่น
+                </button>
+
+                <div class="bg-brand-blue text-white p-4 rounded-[1.5rem] shadow-lg shadow-brand-blue/20 relative overflow-hidden">
+                    <span class="material-icons-round absolute -right-3 -bottom-3 text-[70px] opacity-10">inventory_2</span>
+                    <h2 class="text-lg font-bold leading-tight pr-10">${esc(a.name)}</h2>
+                    <div class="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[11px] text-white/80">
+                        ${d.floor ? `<span class="inline-flex items-center gap-0.5"><span class="material-icons-round text-[13px]">layers</span>ชั้น ${esc(String(d.floor))}</span>` : ''}
+                        ${d.location ? `<span class="inline-flex items-center gap-0.5"><span class="material-icons-round text-[13px]">place</span>${esc(String(d.location))}</span>` : ''}
+                        ${d.parLevel ? `<span class="inline-flex items-center gap-0.5"><span class="material-icons-round text-[13px]">flag</span>Par ${esc(String(d.parLevel))} ${esc(unit)}</span>` : ''}
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-white p-3.5 rounded-[1.25rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100">
+                        <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-1">จำนวนบิลทั้งหมด</p>
+                        <p class="text-xl font-bold text-slate-700">${a.totalBills.toLocaleString()} <span class="text-[10px] font-medium text-slate-400">บิล</span></p>
+                    </div>
+                    <div class="bg-white p-3.5 rounded-[1.25rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100">
+                        <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-1">จัดส่งจริงรวม</p>
+                        <p class="text-xl font-bold text-brand-orange">${a.totalFulfilled.toLocaleString()} <span class="text-[10px] font-medium text-slate-400">${esc(unit)}</span></p>
+                    </div>
+                    <div class="${fulfillBg} p-3.5 rounded-[1.25rem] shadow text-white">
+                        <p class="text-[10px] text-white/80 font-semibold uppercase tracking-wider mb-1">Fulfillment</p>
+                        <p class="text-xl font-bold">${a.fulfillmentRate}<span class="text-[10px] font-medium text-white/80">%</span></p>
+                    </div>
+                    <div class="${dispBg} p-3.5 rounded-[1.25rem] shadow text-white">
+                        <p class="text-[10px] text-white/80 font-semibold uppercase tracking-wider mb-1">จัดส่งล่าสุด</p>
+                        <p class="text-xl font-bold">${a.daysSinceDispatch === null ? 'ยังไม่มี' : (a.daysSinceDispatch === 0 ? 'วันนี้' : a.daysSinceDispatch + ' วันก่อน')}</p>
+                    </div>
+                </div>
+
+                <div class="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm grid grid-cols-3 divide-x divide-slate-100 text-center">
+                    <div class="px-1.5">
+                        <p class="text-[10px] text-slate-400 font-semibold mb-0.5">ขอเบิกรวม</p>
+                        <p class="text-base font-bold text-slate-700">${a.totalRequested.toLocaleString()} <span class="text-[10px] font-medium text-slate-400">${esc(unit)}</span></p>
+                    </div>
+                    <div class="px-1.5">
+                        <p class="text-[10px] text-slate-400 font-semibold mb-0.5">เฉลี่ยต่อบิล</p>
+                        <p class="text-base font-bold text-slate-700">${a.avgPerBill.toLocaleString()} <span class="text-[10px] font-medium text-slate-400">${esc(unit)}</span></p>
+                    </div>
+                    <div class="px-1.5">
+                        <p class="text-[10px] text-slate-400 font-semibold mb-0.5">เบิกล่าสุด</p>
+                        <p class="text-base font-bold text-slate-700">${fmtDate(a.latestRequest)}</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    ${windowCard(3, a.win[3])}
+                    ${windowCard(7, a.win[7])}
+                </div>
+
+                ${a.pending.length > 0 ? `
+                <div>
+                    <h3 class="text-sm font-bold text-amber-600 mb-2 flex items-center gap-2 px-1">
+                        <span class="material-icons-round text-[18px]">pending_actions</span> ค้างเบิกอยู่ (${a.pending.length} บิล · ${a.pendingQty.toLocaleString()} ${esc(unit)})
+                    </h3>
+                    <div class="bg-amber-50 border border-amber-200 rounded-[1.25rem] divide-y divide-amber-100">
+                        ${a.pending.map(p => `
+                            <div class="p-3 flex items-center justify-between gap-2">
+                                <div class="min-w-0">
+                                    <p class="text-[10px] font-mono text-amber-700">ID: ${esc(String(p.id || '-'))}</p>
+                                    <p class="text-[10px] text-slate-500">${esc(p.status)}${p.requestedBy ? ' · ' + esc(p.requestedBy) : ''}</p>
+                                </div>
+                                <span class="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-lg flex-shrink-0">${p.reqQty.toLocaleString()} ${esc(unit)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+
+                <div>
+                    <h3 class="text-sm font-bold text-brand-blue mb-2 flex items-center gap-2 px-1">
+                        <span class="material-icons-round text-brand-orange text-[18px]">receipt_long</span> ประวัติการเบิกรายรอบ
+                    </h3>
+                    <div class="bg-white rounded-[1.5rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100 overflow-hidden">
+                        ${a.timeline.slice(0, 30).map(t => `
+                            <div class="p-3.5 border-b border-slate-50 last:border-0">
+                                <div class="flex justify-between items-center mb-1.5 gap-2">
+                                    <span class="text-[10px] font-mono font-semibold text-brand-blue bg-brand-blue/10 px-2 py-0.5 rounded">${esc(String(t.id || '-'))}</span>
+                                    <div class="flex-shrink-0">${getStatusBadge(t.status)}</div>
+                                </div>
+                                <div class="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500 mb-1.5">
+                                    <span class="inline-flex items-center gap-0.5"><span class="material-icons-round text-[12px]">event_note</span>เบิก: ${t.timestamp ? esc(t.timestamp.split(' / ')[0]) : '-'}</span>
+                                    ${t.dispatchTimestamp ? `<span class="inline-flex items-center gap-0.5 text-emerald-600"><span class="material-icons-round text-[12px]">local_shipping</span>จัดส่ง: ${esc(t.dispatchTimestamp.split(' / ')[0])}</span>` : ''}
+                                    ${t.requestedBy ? `<span class="inline-flex items-center gap-0.5"><span class="material-icons-round text-[12px]">account_circle</span>${esc(t.requestedBy)}</span>` : ''}
+                                </div>
+                                <div class="flex items-center justify-between text-[11px]">
+                                    <span class="text-slate-500">ขอ <span class="font-bold text-slate-700">${t.reqQty.toLocaleString()}</span> · ส่ง <span class="font-bold text-brand-orange">${t.recQty.toLocaleString()}</span> ${esc(unit)}</span>
+                                    ${t.shortage > 0 ? `<span class="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg">ขาด ${t.shortage.toLocaleString()}</span>` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                        ${a.timeline.length > 30 ? `<div class="p-3 text-center text-[10px] text-slate-400 bg-slate-50 border-t border-slate-100">แสดง 30 รอบล่าสุดจากทั้งหมด ${a.timeline.length} รอบ</div>` : ''}
+                    </div>
                 </div>
             `;
         }
