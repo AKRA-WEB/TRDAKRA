@@ -166,7 +166,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260613.02";
+        const CURRENT_VERSION = "20260613.03";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -1932,7 +1932,7 @@
 
         function historyDirBtnInner() {
             const asc = state.historyDir === 'asc';
-            return `<span class="material-icons-round text-[16px]">${asc ? 'arrow_upward' : 'arrow_downward'}</span>${asc ? 'เก่า → ใหม่' : 'ใหม่ → เก่า'}`;
+            return `<span class="material-icons-round text-[16px]">${asc ? 'arrow_upward' : 'arrow_downward'}</span>${asc ? 'เก่าสุดก่อน' : 'ใหม่สุดก่อน'}`;
         }
 
         function updateHistorySearch(value) {
@@ -1974,9 +1974,9 @@
                         </select>
                     </div>
                     <div class="sm:w-36">
-                        <label class="block text-[11px] font-semibold text-slate-500 mb-1">ทิศทาง</label>
+                        <label class="block text-[11px] font-semibold text-slate-500 mb-1">ลำดับเวลา</label>
                         <button id="history-dir-btn" type="button" onclick="toggleHistoryDir()"
-                            aria-label="สลับทิศทางการเรียง เก่าไปใหม่ หรือ ใหม่ไปเก่า"
+                            aria-label="สลับลำดับเวลา เก่าสุดก่อน หรือ ใหม่สุดก่อน"
                             class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-600 flex items-center justify-center gap-1 hover:border-brand-blue transition-all active:scale-[0.98]">${historyDirBtnInner()}</button>
                     </div>
                 </div>
@@ -1985,7 +1985,7 @@
         }
 
         function renderHistoryCards(historyItems, role) {
-            if (historyItems.length === 0) return `<p class="text-center text-slate-400 py-10 text-sm">ไม่พบรายการตามที่ค้นหา</p>`;
+            if (historyItems.length === 0) return `<p class="text-center text-slate-400 py-10 text-sm">ไม่พบรายการที่ตรงกับเงื่อนไข</p>`;
             return historyItems.map(item => `
                     <div class="bg-white p-5 rounded-[1.5rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100 opacity-95 hover:opacity-100 transition-opacity">
                         <div class="flex justify-between items-start mb-3">
