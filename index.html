@@ -166,7 +166,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260613.05";
+        const CURRENT_VERSION = "20260615.01";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -195,6 +195,9 @@
                 .replace(/'/g, '&#39;');
         }
         const attr = esc; // alias ตามชื่อในแผน — logic เดียวกัน (ใช้สำหรับ attribute context)
+        function jsArg(value) {
+            return attr(JSON.stringify(String(value || '')));
+        }
 
         // UI helpers สำหรับแสดง error และ redirect
         function ssoShowError(message) {
@@ -1029,12 +1032,13 @@
             html += sliced.map(p => {
                 const isSelected = !!state.zonePopupSelectedItems[p.name];
                 const enc = encodeURIComponent(p.name);
+                const nameArg = jsArg(p.name);
                 const bgClass = isSelected ? 'bg-indigo-50/50 border-indigo-300 shadow-sm' : 'bg-white border-slate-100';
                 const checkIcon = isSelected ? 'check_box' : 'check_box_outline_blank';
                 const checkColor = isSelected ? 'text-indigo-600 font-bold' : 'text-slate-300';
-                
+
                 return `
-                    <div onclick="togglePopupItemSelect(decodeURIComponent('${enc}'))"
+                    <div onclick="togglePopupItemSelect(${nameArg})"
                          id="popup-row-${enc}"
                          class="bg-white p-3.5 rounded-2xl border shadow-sm mb-2.5 flex items-center justify-between gap-3 cursor-pointer transition-all ${bgClass}">
                         <div class="flex-1 min-w-0">
@@ -1322,7 +1326,7 @@
                     `<div class="p-4 text-sm text-slate-400 text-center">ไม่พบสินค้าที่ค้นหา</div>`;
             } else {
                 listDiv.innerHTML = filtered.map(p => `
-                    <div onclick="selectProduct(decodeURIComponent('${encodeURIComponent(p.name)}'), decodeURIComponent('${encodeURIComponent(p.unit)}'), ${index})" 
+                    <div onclick="selectProduct(${jsArg(p.name)}, ${jsArg(p.unit)}, ${index})"
                          class="px-4 py-3 hover:bg-blue-50 hover:text-blue-700 cursor-pointer border-b border-slate-50 text-sm text-slate-700 last:border-0 truncate flex items-center gap-3 transition-colors">
                         <span class="material-icons-round text-blue-300 text-[18px]">inventory_2</span> ${esc(p.name)} <span class="text-xs text-slate-400">(${esc(p.unit)})</span>
                     </div>
@@ -2707,7 +2711,7 @@
             if (el) el.innerHTML = renderProductLanding();
         }
         function productNameJsArg(name) {
-            return attr(JSON.stringify(String(name || '')));
+            return jsArg(name);
         }
         function selectAnalyticsProduct(name) {
             state.productSelected = String(name || '');
@@ -3726,6 +3730,7 @@
         function renderLocationRow(prod) {
             const isMissing = !prod.floor;
             const enc = encodeURIComponent(prod.name);
+            const nameArg = jsArg(prod.name);
             const borderClass = isMissing ? 'border-rose-200' : 'border-slate-100';
 
             const locCode = displayLocationCode(prod);
@@ -3749,7 +3754,7 @@
                 const checkColor = isSelected ? 'text-indigo-600 font-bold' : 'text-slate-300';
                 
                 return `
-                    <div onclick="toggleBulkItemSelect(decodeURIComponent('${enc}'))"
+                    <div onclick="toggleBulkItemSelect(${nameArg})"
                          id="bulk-row-${enc}"
                          class="p-3.5 rounded-2xl border shadow-sm mb-2.5 flex items-center justify-between gap-3 cursor-pointer transition-all ${bgClass}">
                         <div class="flex-1 min-w-0">
@@ -3779,7 +3784,7 @@
                             ${parBadge}
                         </div>
                     </div>
-                    <button onclick="openLocationSheet(decodeURIComponent('${enc}'))"
+                    <button onclick="openLocationSheet(${nameArg})"
                             class="flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 ${btnClass}">
                         ${btnLabel}
                     </button>
@@ -4287,6 +4292,7 @@
             const curStock = edit.currentStock !== undefined ? edit.currentStock : '';
             const requestQty = edit.requestQty !== undefined ? edit.requestQty : '';
             const enc = encodeURIComponent(prod.name);
+            const nameArg = jsArg(prod.name);
             const par = prod.parLevel || 0;
             
             // คำนวณเบื้องต้น
@@ -4304,7 +4310,7 @@
 
             return `
                 <div class="rounded-2xl ${cardBg} shadow-sm transition-all duration-200 flex flex-col mb-3 overflow-hidden">
-                    <div onclick="toggleCheckStockItem(decodeURIComponent('${enc}'))"
+                    <div onclick="toggleCheckStockItem(${nameArg})"
                          class="flex justify-between items-center gap-3 p-4 cursor-pointer active:bg-indigo-50/60 transition-colors select-none">
                         <div class="flex-1 min-w-0">
                             <h4 class="text-sm font-bold ${checked ? 'text-brand-blue' : 'text-slate-800'} leading-snug">${esc(prod.name)}</h4>
@@ -4313,10 +4319,10 @@
                                 ${state.checkStockEditingPar === prod.name ? `
                                     <input type="number" min="0" value="${state.checkStockParInput}"
                                         oninput="state.checkStockParInput=this.value"
-                                        onkeydown="if(event.key==='Enter') saveParEdit(decodeURIComponent('${enc}'))"
+                                        onkeydown="if(event.key==='Enter') saveParEdit(${nameArg})"
                                         autofocus
                                         class="w-20 px-2 py-0.5 text-[11px] font-bold border border-brand-blue rounded-lg text-center focus:outline-none">
-                                    <button onclick="saveParEdit(decodeURIComponent('${enc}'))"
+                                    <button onclick="saveParEdit(${nameArg})"
                                         class="text-[9px] font-bold bg-brand-blue text-white px-2 py-0.5 rounded-full active:scale-95">✓</button>
                                     <button onclick="state.checkStockEditingPar=null; render()"
                                         class="text-[9px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full active:scale-95">✕</button>
@@ -4324,7 +4330,7 @@
                                     <span class="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
                                         Par: ${par > 0 ? `${par} ${esc(prod.unit)}` : 'ยังไม่ตั้ง ⚠️'}
                                     </span>
-                                    <button onclick="openParEdit(decodeURIComponent('${enc}'))"
+                                    <button onclick="openParEdit(${nameArg})"
                                         class="text-[9px] text-slate-400 hover:text-brand-blue transition-colors flex items-center gap-0.5">
                                         <span class="material-icons-round text-[12px]">edit</span>
                                     </button>
@@ -4342,7 +4348,7 @@
                                 👉 จำนวนที่เหลืออยู่บนชั้น (${esc(prod.unit)}) <span class="text-rose-500">*</span>
                             </label>
                             <input type="number" min="0" value="${curStock}" placeholder="กรอกจำนวนคงเหลือ..."
-                                oninput="updateCheckStockStock(decodeURIComponent('${enc}'), this.value)"
+                                oninput="updateCheckStockStock(${nameArg}, this.value)"
                                 class="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold focus:border-brand-blue text-center transition-all">
                         </div>
                         <div class="text-xs font-semibold text-brand-blue flex justify-between items-center bg-indigo-50 border border-indigo-100 px-3 py-2 rounded-xl" id="calc-need-${enc}">
@@ -4360,13 +4366,13 @@
                                 <div>
                                     <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">เหลืออยู่</label>
                                     <input type="number" min="0" value="${curStock}" placeholder="เหลืออยู่..."
-                                        oninput="updateCheckStockStock(decodeURIComponent('${enc}'), this.value)"
+                                        oninput="updateCheckStockStock(${nameArg}, this.value)"
                                         class="w-full p-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-center">
                                 </div>
                                 <div>
                                     <label class="block text-[10px] font-bold text-brand-orange uppercase mb-1">สั่งเบิกเพิ่ม <span class="text-rose-500">*</span></label>
                                     <input type="number" min="1" value="${requestQty}" placeholder="สั่งเบิก..."
-                                        oninput="updateCheckStockRequestQty(decodeURIComponent('${enc}'), this.value)"
+                                        oninput="updateCheckStockRequestQty(${nameArg}, this.value)"
                                         class="w-full p-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-center text-brand-orange focus:border-brand-orange">
                                 </div>
                             </div>
