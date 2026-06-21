@@ -166,7 +166,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260615.01";
+        const CURRENT_VERSION = "20260621.01";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -1222,6 +1222,8 @@
 
         async function fetchInitialData(isRefresh = false, skipHideLoading = false) {
             if (!APPS_SCRIPT_URL) { hideLoading(); alert('กรุณาใส่ APPS_SCRIPT_URL ก่อนใช้งาน'); return; }
+            
+            const startTotal = performance.now();
             if (!isRefresh) {
                 const cached = getCache('TRDAKRA_DATA', TRD_CACHE_TTL);
                 if (cached) {
@@ -1232,12 +1234,23 @@
             } else { showLoading('กำลังรีเฟรชข้อมูล...'); }
 
             try {
-                const itemsResponse = await fetch(`${APPS_SCRIPT_URL}?action=getItems`);
-                const itemsData = await itemsResponse.json();
-                state.items = (itemsData || []).map(mapItemData);
+                // Fetch items and products in parallel for performance quick win
+                const startFetch = performance.now();
+                const [itemsResponse, productsResponse] = await Promise.all([
+                    fetch(`${APPS_SCRIPT_URL}?action=getItems`),
+                    fetch(`${APPS_SCRIPT_URL}?action=getProducts`)
+                ]);
+                const durationFetch = ((performance.now() - startFetch) / 1000).toFixed(2);
 
-                const productsResponse = await fetch(`${APPS_SCRIPT_URL}?action=getProducts`);
-                const productsData = await productsResponse.json();
+                const startParse = performance.now();
+                const [itemsData, productsData] = await Promise.all([
+                    itemsResponse.json(),
+                    productsResponse.json()
+                ]);
+                const durationParse = ((performance.now() - startParse) / 1000).toFixed(2);
+
+                const startRender = performance.now();
+                state.items = (itemsData || []).map(mapItemData);
                 if (Array.isArray(productsData)) {
                     state.products = productsData.map(p => {
                         if (typeof p === 'object' && p !== null) {
@@ -1255,6 +1268,12 @@
 
                 setCache('TRDAKRA_DATA', { rawItems: itemsData, products: state.products });
                 render();
+                const durationRender = ((performance.now() - startRender) / 1000).toFixed(2);
+                
+                const durationTotal = ((performance.now() - startTotal) / 1000).toFixed(2);
+                if (window.location.search.includes('perf=1')) {
+                    console.log(`[PERF] fetchInitialData: total=${durationTotal}s, fetch=${durationFetch}s, parse=${durationParse}s, render=${durationRender}s`);
+                }
             } catch (error) {
                 console.error('Error fetching data:', error);
                 if (!getCache('TRDAKRA_DATA', TRD_CACHE_TTL)) alert('ไม่สามารถเชื่อมต่อกับฐานข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
@@ -1287,7 +1306,54 @@
             if (r === 'no_token' || r === 'invalid_or_expired_token' || r === 'verify_failed') {
                 return 'เซสชันหมดอายุหรือสิทธิ์ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่';
             }
+            if (r.indexOf('duplicate_active_request') !== -1) {
+                return 'มีคำขอเบิกสินค้านี้ค้างอยู่ในระบบแล้ว ไม่สามารถส่งซ้ำได้';
+            }
+            if (r.indexOf('duplicate_id') !== -1) {
+                return 'รหัสคำขอซ้ำในระบบ กรุณาลองใหม่อีกครั้ง';
+            }
+            if (r.indexOf('row_not_found') !== -1) {
+                return 'ไม่พบรายการที่ต้องการแก้ไขในระบบ ข้อมูลอาจถูกอัปเดตหรือลบไปแล้ว';
+            }
+            if (r.indexOf('lock_timeout') !== -1) {
+                return 'ระบบไม่สามารถล็อกฐานข้อมูลได้ กรุณาลองใหม่อีกครั้งในภายหลัง';
+            }
+            if (r.indexOf('invalid_patch') !== -1) {
+                return 'ข้อมูลที่ส่งแก้ไขไม่ถูกต้องหรือไม่ได้รับอนุญาต';
+            }
+            if (r.indexOf('unsupported_operation') !== -1) {
+                return 'ไม่รองรับคำสั่งบันทึกประเภทนี้';
+            }
             return 'บันทึกไม่สำเร็จ ข้อมูลอาจยังไม่ถูกบันทึก กรุณาลองใหม่อีกครั้ง';
+        }
+
+        // คืน object response เมื่อสำเร็จ, คืน false เมื่อล้มเหลว
+        async function saveInventoryDelta(operations, options = {}) {
+            if (await AppVersionGuard.blockIfStale()) return false;
+            if (!APPS_SCRIPT_URL) return false;
+            const skipHideLoading = !!options.skipHideLoading;
+            showLoading('กำลังบันทึกข้อมูล...');
+            try {
+                const start = performance.now();
+                const res = await postMutation({
+                    action: 'mutateInventoryDelta',
+                    clientMutationId: options.clientMutationId || '',
+                    operations: operations
+                });
+                const duration = ((performance.now() - start) / 1000).toFixed(2);
+                if (window.location.search.includes('perf=1')) {
+                    console.log(`[PERF] saveInventoryDelta (${options.perfName || 'unknown'}): ${duration}s, response:`, res);
+                }
+                return res;
+            } catch (error) {
+                console.error('Error saving delta:', error);
+                alert(saveErrorMessage(error));
+                return false;
+            } finally {
+                if (!skipHideLoading) {
+                    hideLoading();
+                }
+            }
         }
 
         // คืน true เมื่อบันทึกสำเร็จจริง, false เมื่อล้มเหลว (caller ต้องไม่แสดงสำเร็จเมื่อ false)
@@ -1380,6 +1446,19 @@
             if (!confirm(`ล้างรายการสินค้าหมดทั้งหมด ${stockoutItems.length} รายการ?\nรายการจะย้ายไปประวัติ ไม่สามารถนำกลับมาได้`)) return;
             showLoading('กำลังล้างรายการสินค้าหมด...');
             const now = formatDateTime(new Date().toISOString());
+            
+            const operations = stockoutItems.map(i => ({
+                op: 'updateById',
+                id: i.id,
+                patch: {
+                    status: 'ยกเลิกรายการ',
+                    dispatchTimestamp: now
+                }
+            }));
+            
+            const res = await saveInventoryDelta(operations, { perfName: 'clearAllStockout' });
+            if (!res) { await fetchInitialData(true); hideLoading(); return; }
+
             state.items = state.items.map(i =>
                 i.status === 'สินค้าหมด'
                     ? { ...i, status: 'ยกเลิกรายการ', dispatchTimestamp: now }
@@ -1387,7 +1466,6 @@
             );
             state.w2BatchEdits = {};
             render();
-            if (!(await syncDataToSheet())) { await fetchInitialData(true); hideLoading(); return; }
             sendAppLog('ล้างสินค้าหมด (AKRA)', `${stockoutItems.length} รายการ → ยกเลิกรายการ`);
             hideLoading();
         }
@@ -1562,11 +1640,18 @@
                 requestedBy: currentUser || 'ไม่ทราบ'
             };
 
+            const operations = [{
+                op: 'append',
+                item: newItem
+            }];
+            
+            const res = await saveInventoryDelta(operations, { perfName: 'handleW1Submit' });
+            if (!res) { await fetchInitialData(true); return; }
+
             state.items.unshift(newItem); 
             state.w1Tab = 'pending'; 
             render(); 
             
-            if (!(await syncDataToSheet())) { await fetchInitialData(true); return; }
             alert('ส่งคำขอเบิกสินค้าเรียบร้อยแล้ว!');
             const unit = getProductUnitClient(itemName);
             sendAppLog("สั่งเบิกสินค้า (TRD)", `เบิก: ${itemName} จำนวน ${qty} ${unit} (ความจุ: ${storageCapacity})`);
@@ -1632,7 +1717,52 @@
 
             showLoading('กำลังส่งรายการเบิก...');
 
-            // กู้คืนรายการเดิม — อัปเดต status + qty + timestamp
+            // สร้างรายการใหม่
+            const newItems = toCreate.map(row => ({
+                id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
+                rawDate: now,
+                timestamp,
+                itemName: row.itemName,
+                requestQty: parseInt(row.qty),
+                storageCapacity: row.parLevel ? parseInt(row.parLevel) : (row.storageCapacity ? parseInt(row.storageCapacity) : 0),
+                status: 'สั่งเบิก',
+                oldExpiry: row.oldExpiry ? convertToCE(row.oldExpiry) : 'ไม่ได้ระบุ',
+                newExpiry: '', receiveQty: null, receiveNote: '', w2Note: '',
+                requestedBy: currentUser || 'ไม่ทราบ'
+            }));
+
+            const operations = [];
+            
+            // 1. Restore operations
+            toRestore.forEach(r => {
+                operations.push({
+                    op: 'updateById',
+                    id: r.existing.id,
+                    patch: {
+                        status: 'สั่งเบิก',
+                        requestQty: parseInt(r.row.qty),
+                        storageCapacity: r.row.parLevel ? parseInt(r.row.parLevel) : (r.existing.storageCapacity || 0),
+                        oldExpiry: r.row.oldExpiry ? convertToCE(r.row.oldExpiry) : r.existing.oldExpiry,
+                        timestamp,
+                        requestedBy: currentUser || 'ไม่ทราบ',
+                        dispatchTimestamp: '',
+                        w2Note: ''
+                    }
+                });
+            });
+
+            // 2. Append operations in reversed order to preserve physical UI ordering
+            newItems.slice().reverse().forEach(item => {
+                operations.push({
+                    op: 'append',
+                    item: item
+                });
+            });
+
+            const res = await saveInventoryDelta(operations, { perfName: 'handleW1SubmitBulk' });
+            if (!res) { hideLoading(); await fetchInitialData(true); return; }
+
+            // กู้คืนรายการเดิม
             if (toRestore.length > 0) {
                 const restoreIds = new Set(toRestore.map(r => r.existing.id));
                 const restoreMap = {};
@@ -1656,19 +1786,6 @@
                 });
             }
 
-            // สร้างรายการใหม่
-            const newItems = toCreate.map(row => ({
-                id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
-                rawDate: now,
-                timestamp,
-                itemName: row.itemName,
-                requestQty: parseInt(row.qty),
-                storageCapacity: row.parLevel ? parseInt(row.parLevel) : (row.storageCapacity ? parseInt(row.storageCapacity) : 0),
-                status: 'สั่งเบิก',
-                oldExpiry: row.oldExpiry ? convertToCE(row.oldExpiry) : 'ไม่ได้ระบุ',
-                newExpiry: '', receiveQty: null, receiveNote: '', w2Note: '',
-                requestedBy: currentUser || 'ไม่ทราบ'
-            }));
             if (newItems.length > 0) {
                 state.items = [...newItems, ...state.items];
             }
@@ -1676,8 +1793,6 @@
             state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' }];
             state.w1Tab = 'pending';
             render();
-
-            if (!(await syncDataToSheet())) { hideLoading(); await fetchInitialData(true); return; }
 
             // อัปเดต Floor/Location/ParLevel กลับ Product Sheet
             for (const row of validRows) {
@@ -1697,13 +1812,25 @@
         }
 
         async function cancelW1Item(id) {
+            const nowTime = formatDateTime(new Date().toISOString());
+            const operations = [{
+                op: 'updateById',
+                id: id,
+                patch: {
+                    status: 'ยกเลิกรายการ',
+                    dispatchTimestamp: nowTime
+                }
+            }];
+            
+            const res = await saveInventoryDelta(operations, { perfName: 'cancelW1Item' });
+            if (!res) { await fetchInitialData(true); return; }
+
             state.items = state.items.map(item =>
                 item.id === id
-                    ? { ...item, status: 'ยกเลิกรายการ', dispatchTimestamp: formatDateTime(new Date().toISOString()) }
+                    ? { ...item, status: 'ยกเลิกรายการ', dispatchTimestamp: nowTime }
                     : item
             );
             render();
-            if (!(await syncDataToSheet())) { await fetchInitialData(true); return; }
             sendAppLog('ยกเลิกการเบิก (TRD)', `ID: ${id}`);
         }
 
@@ -1849,9 +1976,17 @@
                 requestedBy: currentUser || 'ไม่ทราบ'
             }));
 
+            // Append operations in reversed order to preserve physical UI ordering
+            const operations = newItems.slice().reverse().map(item => ({
+                op: 'append',
+                item: item
+            }));
+
+            const res = await saveInventoryDelta(operations, { perfName: 'handleSurveyBulkOrder' });
+            if (!res) { hideLoading(); await fetchInitialData(true); return; }
+
             state.items = [...newItems, ...state.items];
             render();
-            if (!(await syncDataToSheet())) { hideLoading(); await fetchInitialData(true); return; }
 
             // บันทึก SurveyLog (non-fatal: รายการเบิกถูกบันทึกแล้ว)
             const logItems = list.map(item => {
@@ -3427,6 +3562,28 @@
 
             const now = formatDateTime(new Date().toISOString());
 
+            const operations = [];
+            for (const [id, edit] of Object.entries(edits)) {
+                const item = state.items.find(i => i.id === id);
+                if (!item) continue;
+                let patch = null;
+                if (edit === 'dispatch') {
+                    patch = { status: 'จัดส่งแล้ว', receiveQty: item.requestQty, receiveNote: 'ครบ', dispatchTimestamp: now };
+                } else if (edit === 'partial') {
+                    const actual   = (state.w2PartialQty || {})[item.id] || 0;
+                    const shortage = item.requestQty - actual;
+                    patch = { status: 'จัดส่งไม่ครบ', receiveQty: actual, receiveNote: `ส่ง ${actual}/${item.requestQty} ขาด ${shortage}`, dispatchTimestamp: now };
+                } else if (edit === 'outstock') {
+                    patch = { status: 'สินค้าหมด', dispatchTimestamp: now };
+                }
+                if (patch) {
+                    operations.push({ op: 'updateById', id: item.id, patch });
+                }
+            }
+
+            const res = await saveInventoryDelta(operations, { perfName: 'confirmBatchDispatch' });
+            if (!res) { await fetchInitialData(true); return; }
+
             state.items = state.items.map(item => {
                 const edit = edits[item.id];
                 if (edit === 'dispatch') {
@@ -3446,7 +3603,6 @@
             state.w2BatchEdits = {};
             state.w2PartialQty = {};
             render();
-            if (!(await syncDataToSheet())) { await fetchInitialData(true); return; }
             sendAppLog('จัดส่งสินค้า Batch (AKRA)', `ครบ ${dispatchCount} · ไม่ครบ ${partialCount} รายการ`);
         }
 
@@ -4237,8 +4393,16 @@
             try {
                 // 1. Submit orders if any
                 if (newOrders.length > 0) {
+                    // Append operations in reversed order to preserve physical UI ordering
+                    const operations = newOrders.slice().reverse().map(item => ({
+                        op: 'append',
+                        item: item
+                    }));
+                    
+                    const res = await saveInventoryDelta(operations, { perfName: 'submitZoneCheck', skipHideLoading: true });
+                    if (!res) { await fetchInitialData(true, true); return; }
+                    
                     state.items = [...newOrders, ...state.items];
-                    if (!(await syncDataToSheet(true))) { await fetchInitialData(true, true); return; }
                 }
 
                 // 2. Submit survey log (non-fatal: รายการสั่งเบิกถูกบันทึกแล้ว)
