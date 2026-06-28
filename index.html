@@ -166,7 +166,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260628.02";
+        const CURRENT_VERSION = "20260628.03";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -451,7 +451,13 @@
 
         const TRD_CACHE_TTL = 10 * 60 * 1000;
         function getCache(key, ttlMs) { try { const raw = localStorage.getItem(key); if (!raw) return null; const w = JSON.parse(raw); if (Date.now() - (w._ts||0) > ttlMs) { localStorage.removeItem(key); return null; } return w._d; } catch(e) { localStorage.removeItem(key); return null; } }
-        function setCache(key, data) { localStorage.setItem(key, JSON.stringify({ _ts: Date.now(), _d: data })); }
+        function setCache(key, data) {
+            try {
+                localStorage.setItem(key, JSON.stringify({ _ts: Date.now(), _d: data }));
+            } catch (e) {
+                console.warn('Cache write skipped:', e);
+            }
+        }
         function mapItemData(item) {
             return {
                 ...item,
