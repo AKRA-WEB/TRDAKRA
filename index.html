@@ -166,7 +166,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260628.01";
+        const CURRENT_VERSION = "20260628.02";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -1212,6 +1212,13 @@
         function normItemName(name) {
             return (name || '').toString().trim().replace(/\s+/g, ' ').toLowerCase();
         }
+        function getActualReceivedQty(item) {
+            if (!item) return 0;
+            if (item.recheckQty !== undefined && item.recheckQty !== null && item.recheckQty !== '') {
+                return parseInt(item.recheckQty) || 0;
+            }
+            return parseInt(item.receiveQty) || 0;
+        }
         // ชื่อสินค้า (normalize) ที่มีคำขอเบิกค้างอยู่ใน state ปัจจุบัน
         function getActiveRequestNames() {
             const set = new Set();
@@ -1575,7 +1582,7 @@
                 if (!map[key]) map[key] = { billCount: 0, hasStockout: false, qty: 0 };
                 if (item.status === 'จัดส่งแล้ว' || item.status === 'จัดส่งไม่ครบ' || item.status === 'รับสินค้าแล้ว') {
                     map[key].billCount++;
-                    map[key].qty += parseInt(item.receiveQty) || 0;
+                    map[key].qty += getActualReceivedQty(item);
                 }
                 if (item.status === 'สินค้าหมด') map[key].hasStockout = true;
             });
@@ -1842,11 +1849,15 @@
             const item = state.items.find(i => i.id === itemId);
             if (!item) return;
             const qty      = parseInt(value) || 0;
-            const w2Qty    = item.receiveQty != null ? item.receiveQty : item.requestQty;
-            const shortage = w2Qty - qty;
+            const w2Qty    = parseInt(item.receiveQty != null ? item.receiveQty : item.requestQty) || 0;
+            const requestedQty = parseInt(item.requestQty) || 0;
+            const shortage = requestedQty - qty;
             const el = document.getElementById(`recheck-info-${enc}`);
             if (!el) return;
-            if (qty > 0 && shortage > 0) {
+            if (qty > w2Qty) {
+                el.textContent = `เกินยอดที่ W2 ส่ง (${w2Qty} ${getProductUnitClient(item.itemName)})`;
+                el.className = 'text-[10px] font-bold text-center mb-3 text-rose-600';
+            } else if (qty > 0 && shortage > 0) {
                 el.textContent = `ขาด ${shortage} ${getProductUnitClient(item.itemName)}`;
                 el.className = 'text-[10px] font-bold text-center mb-3 text-amber-600';
             } else if (qty > 0 && shortage <= 0) {
@@ -1868,10 +1879,15 @@
             const qty = parseInt(recheckVal);
             if (isNaN(qty) || qty < 0) { alert('จำนวนไม่ถูกต้อง'); return; }
             const unit    = getProductUnitClient(item.itemName);
-            const w2Qty   = item.receiveQty != null ? item.receiveQty : item.requestQty;
-            const isFull  = qty >= w2Qty;
+            const w2Qty   = parseInt(item.receiveQty != null ? item.receiveQty : item.requestQty) || 0;
+            const requestedQty = parseInt(item.requestQty) || 0;
+            if (qty > w2Qty) {
+                alert(`จำนวนรับจริงมากกว่ายอดที่ W2 ส่งมา (${w2Qty} ${unit}) กรุณาตรวจสอบอีกครั้ง`);
+                return;
+            }
+            const isFull  = qty >= requestedQty;
             const newStatus  = isFull ? 'รับสินค้าแล้ว' : 'จัดส่งไม่ครบ';
-            const recheckNote = isFull ? 'ครบ' : `รับจริง ${qty}/${w2Qty} ขาด ${w2Qty - qty}`;
+            const recheckNote = isFull ? 'ครบ' : `รับจริง ${qty}/${requestedQty} ขาด ${requestedQty - qty}${w2Qty !== requestedQty ? ` (W2 ส่ง ${w2Qty})` : ''}`;
             const now    = formatDateTime(new Date().toISOString());
             const patch  = { status: newStatus, recheckQty: qty, recheckAt: now, recheckBy: currentUser || '', recheckNote };
             if (!confirm(`ยืนยันตรวจรับ "${item.itemName}"\nรับจริง ${qty} ${unit} → ${newStatus}`)) return;
@@ -2242,12 +2258,12 @@
                                     ${role === 'w1' ? `<p class="text-[11px] text-brand-blue font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">hourglass_empty</span> EXP ใหม่: ${esc(item.newExpiry)}</p>` : ''}
                                 ` : ''}
                                 ${item.status === 'รับสินค้าแล้ว' ? `
-                                    <p class="mt-1 text-slate-600">เบิก <span class="font-semibold text-slate-700">${item.requestQty} ${esc(getProductUnitClient(item.itemName))}</span> (ความจุ ${item.storageCapacity || 0}) • รับจริง <span class="font-semibold text-emerald-600">${item.recheckQty != null ? item.recheckQty : item.receiveQty} ${esc(getProductUnitClient(item.itemName))}</span></p>
+                                    <p class="mt-1 text-slate-600">เบิก <span class="font-semibold text-slate-700">${item.requestQty} ${esc(getProductUnitClient(item.itemName))}</span> (ความจุ ${item.storageCapacity || 0}) • รับจริง <span class="font-semibold text-emerald-600">${getActualReceivedQty(item)} ${esc(getProductUnitClient(item.itemName))}</span></p>
                                     ${item.recheckBy ? `<p class="text-[11px] text-purple-600 font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">verified_user</span> ตรวจรับโดย ${esc(item.recheckBy)}${item.recheckAt ? ' · ' + item.recheckAt : ''}</p>` : ''}
                                     ${role === 'w1' ? `<p class="text-[11px] text-brand-blue font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">hourglass_empty</span> EXP ใหม่: ${esc(item.newExpiry)}</p>` : ''}
                                 ` : ''}
                                 ${item.status === 'จัดส่งไม่ครบ' ? (() => {
-                                    const received = item.recheckQty != null ? item.recheckQty : (item.receiveQty || 0);
+                                    const received = getActualReceivedQty(item);
                                     const shortage = item.requestQty - received;
                                     return `
                                     <div class="mt-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
@@ -2398,7 +2414,7 @@
             const requesterStats = {};
 
             dispatchedItems.forEach(item => {
-                const qty = parseInt(item.receiveQty) || 0;
+                const qty = getActualReceivedQty(item);
                 const reqQty = parseInt(item.requestQty) || 0;
                 const capacity = parseInt(item.storageCapacity) || 0;
                 totalQty += qty;
@@ -2524,7 +2540,7 @@
                                             <span class="material-icons-round text-[12px] text-slate-400">inventory_2</span>
                                             ความจุ: <span class="font-medium text-slate-700">${bill.storageCapacity || 0} ชิ้น</span>
                                         </div>
-                                        <span class="text-xs font-bold text-brand-orange bg-brand-orange/10 px-2 py-1 rounded-lg">ส่ง ${bill.receiveQty} ชิ้น</span>
+                                        <span class="text-xs font-bold text-brand-orange bg-brand-orange/10 px-2 py-1 rounded-lg">รับ ${getActualReceivedQty(bill)} ชิ้น</span>
                                     </div>
                                 </div>
                             `).join('')}
@@ -2679,7 +2695,7 @@
             });
 
             const dispatched = dayItems.filter(i => i.status === 'จัดส่งแล้ว' || i.status === 'รับสินค้าแล้ว');
-            const totalQty = dispatched.reduce((s, i) => s + (parseInt(i.receiveQty) || 0), 0);
+            const totalQty = dispatched.reduce((s, i) => s + getActualReceivedQty(i), 0);
 
             return `
                 <div class="bg-white rounded-[1.5rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100 overflow-hidden animate-fade-in">
@@ -2709,7 +2725,7 @@
                                             ${item.requestedBy ? `<p class="text-[10px] text-slate-400">โดย: ${esc(item.requestedBy)}</p>` : ''}
                                         </div>
                                         <div class="flex items-center gap-2 flex-shrink-0">
-                                            ${item.receiveQty ? `<span class="text-xs font-bold text-brand-orange">${item.receiveQty} ชิ้น</span>` : ''}
+                                            ${getActualReceivedQty(item) ? `<span class="text-xs font-bold text-brand-orange">${getActualReceivedQty(item)} ชิ้น</span>` : ''}
                                             <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full ${chipCls}">${esc(item.status)}</span>
                                         </div>
                                     </div>
@@ -2817,7 +2833,7 @@
                 const name = (item.itemName || '').trim();
                 if (!name) return;
                 if (!map[name]) map[name] = { name, qty: 0, bills: 0 };
-                map[name].qty += parseInt(item.receiveQty) || 0;
+                map[name].qty += getActualReceivedQty(item);
                 map[name].bills++;
             });
             return Object.values(map).sort((a, b) => b.qty - a.qty);
@@ -2849,7 +2865,7 @@
 
             records.forEach(item => {
                 const reqQty = parseInt(item.requestQty) || 0;
-                const recQty = parseInt(item.receiveQty) || 0;
+                const recQty = getActualReceivedQty(item);
                 const { reqDate, dispDate } = productRecordDates(item);
                 const isFulfilled = FULFILLED_STATUSES.includes(item.status);
                 const isPending = ACTIVE_W1_STATUSES.includes(item.status);
@@ -3500,7 +3516,7 @@
                             </div>`;
 
                         if (item.status === 'รอตรวจรับ') {
-                            const w2Qty     = item.receiveQty != null ? item.receiveQty : item.requestQty;
+                            const w2Qty     = parseInt(item.receiveQty != null ? item.receiveQty : item.requestQty) || 0;
                             const curRecheck = (state.recheckQty || {})[item.id] || '';
                             return `
                         <div class="bg-white p-5 rounded-[1.5rem] shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-purple-100 transition-all">
@@ -3522,7 +3538,7 @@
                                 <span class="material-icons-round text-brand-blue text-[18px] flex-shrink-0">fact_check</span>
                                 <div class="flex-1 min-w-0">
                                     <p class="text-[10px] font-bold text-brand-blue mb-1">รับจริง (W2 ส่ง ${w2Qty} ${esc(unit)})</p>
-                                    <input type="number" min="0" max="${item.requestQty}"
+                                    <input type="number" min="0" max="${w2Qty}" inputmode="numeric"
                                            value="${esc(curRecheck)}"
                                            placeholder="0"
                                            oninput="updateRecheckQty(decodeURIComponent('${enc}'), this.value)"
