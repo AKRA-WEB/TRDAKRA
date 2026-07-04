@@ -7,21 +7,7 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📦</text></svg>">
     <title>ระบบเบิกจ่ายสินค้า TRD-AKRA</title>
     <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        brand: {
-                            blue: '#171C8F',
-                            orange: '#E35205',
-                        }
-                    }
-                }
-            }
-        }
-    </script>
+    <link rel="stylesheet" href="tailwind.css">
     <!-- Google Material Icons -->
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -166,7 +152,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260628.03";
+        const CURRENT_VERSION = "20260704.01";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -357,7 +343,10 @@
             surveyLogsLoading: false,
             // Product deep-dive analytics
             productSearch: '',
-            productSelected: null
+            productSelected: null,
+            fullHistoryLoaded: false,
+            fullHistoryLoading: false,
+            fullHistoryError: ''
         };
 
         function showLoading(text = 'กำลังทำงาน...') {
@@ -450,6 +439,7 @@
         }
 
         const TRD_CACHE_TTL = 10 * 60 * 1000;
+        const INVENTORY_WINDOW_DAYS = 30;
         function getCache(key, ttlMs) { try { const raw = localStorage.getItem(key); if (!raw) return null; const w = JSON.parse(raw); if (Date.now() - (w._ts||0) > ttlMs) { localStorage.removeItem(key); return null; } return w._d; } catch(e) { localStorage.removeItem(key); return null; } }
         function setCache(key, data) {
             try {
@@ -457,6 +447,10 @@
             } catch (e) {
                 console.warn('Cache write skipped:', e);
             }
+        }
+        function itemsUrl(days) {
+            const suffix = days ? `&days=${encodeURIComponent(days)}` : '';
+            return `${APPS_SCRIPT_URL}?action=getItems${suffix}`;
         }
         function mapItemData(item) {
             return {
@@ -470,6 +464,25 @@
                 newExpiry: formatExpiryDate(item.newExpiry),
                 storageCapacity: parseInt(item.currentStock || item.storageCapacity) || 0
             };
+        }
+
+        function sortItemsNewestFirst(items) {
+            return items.slice().sort((a, b) => {
+                const da = a.rawDate ? new Date(a.rawDate).getTime() : 0;
+                const db = b.rawDate ? new Date(b.rawDate).getTime() : 0;
+                return db - da;
+            });
+        }
+
+        function mergeItemsById(currentItems, rawItems) {
+            const byId = new Map();
+            (currentItems || []).forEach(item => {
+                if (item && item.id !== undefined && item.id !== null) byId.set(String(item.id), item);
+            });
+            (rawItems || []).map(mapItemData).forEach(item => {
+                if (item && item.id !== undefined && item.id !== null) byId.set(String(item.id), item);
+            });
+            return sortItemsNewestFirst(Array.from(byId.values()));
         }
 
         // ── ดึงข้อมูล floor/location/parLevel ของสินค้าจาก state.products ──
@@ -1234,15 +1247,71 @@
             return set;
         }
 
+        function needsFullHistoryForCurrentView() {
+            return (state.view === 'w1' && state.w1Tab === 'history') ||
+                (state.view === 'w2' && state.w2Tab === 'history') ||
+                (state.view === 'dashboard' && state.dashboardTab === 'product');
+        }
+
+        function renderOrLoadFullHistory() {
+            if (needsFullHistoryForCurrentView() && !state.fullHistoryLoaded && !state.fullHistoryLoading) {
+                ensureFullHistoryLoaded({ renderStart: true });
+            } else {
+                render();
+            }
+        }
+
+        function renderFullHistoryNotice() {
+            if (state.fullHistoryLoading) {
+                return `<div class="bg-blue-50 border border-blue-100 text-blue-700 rounded-2xl px-4 py-3 text-xs font-semibold flex items-center gap-2">
+                    <span class="material-icons-round text-[16px] animate-spin">sync</span>
+                    กำลังโหลดประวัติทั้งหมด...
+                </div>`;
+            }
+            if (state.fullHistoryError) {
+                return `<div class="bg-amber-50 border border-amber-100 text-amber-700 rounded-2xl px-4 py-3 text-xs font-semibold flex items-center gap-2">
+                    <span class="material-icons-round text-[16px]">warning_amber</span>
+                    โหลดประวัติทั้งหมดไม่สำเร็จ แสดงข้อมูลล่าสุดก่อน
+                </div>`;
+            }
+            return '';
+        }
+
+        async function ensureFullHistoryLoaded(options = {}) {
+            if (state.fullHistoryLoaded || state.fullHistoryLoading) return state.fullHistoryLoaded;
+            state.fullHistoryLoading = true;
+            state.fullHistoryError = '';
+            if (options.renderStart) render();
+            try {
+                const res = await fetch(itemsUrl());
+                if (!res.ok) throw new Error('http_' + res.status);
+                const fullItems = await res.json();
+                state.items = mergeItemsById(state.items, fullItems || []);
+                state.fullHistoryLoaded = true;
+            } catch (error) {
+                console.error('Full history load failed:', error);
+                state.fullHistoryError = 'load_failed';
+            } finally {
+                state.fullHistoryLoading = false;
+                render();
+            }
+            return state.fullHistoryLoaded;
+        }
+
         async function fetchInitialData(isRefresh = false, skipHideLoading = false) {
             if (!APPS_SCRIPT_URL) { hideLoading(); alert('กรุณาใส่ APPS_SCRIPT_URL ก่อนใช้งาน'); return; }
-            
+
             const startTotal = performance.now();
+            let hasUsableCache = false;
             if (!isRefresh) {
                 const cached = getCache('TRDAKRA_DATA', TRD_CACHE_TTL);
-                if (cached) {
+                hasUsableCache = !!(cached && cached.windowDays === INVENTORY_WINDOW_DAYS);
+                if (hasUsableCache) {
                     state.items = (cached.rawItems || []).map(mapItemData);
                     state.products = cached.products || [];
+                    state.fullHistoryLoaded = false;
+                    state.fullHistoryLoading = false;
+                    state.fullHistoryError = '';
                     render();
                 } else { showLoading('กำลังโหลดข้อมูล...'); }
             } else { showLoading('กำลังรีเฟรชข้อมูล...'); }
@@ -1251,7 +1320,7 @@
                 // Fetch items and products in parallel for performance quick win
                 const startFetch = performance.now();
                 const [itemsResponse, productsResponse] = await Promise.all([
-                    fetch(`${APPS_SCRIPT_URL}?action=getItems`),
+                    fetch(itemsUrl(INVENTORY_WINDOW_DAYS)),
                     fetch(`${APPS_SCRIPT_URL}?action=getProducts`)
                 ]);
                 const durationFetch = ((performance.now() - startFetch) / 1000).toFixed(2);
@@ -1265,6 +1334,9 @@
 
                 const startRender = performance.now();
                 state.items = (itemsData || []).map(mapItemData);
+                state.fullHistoryLoaded = false;
+                state.fullHistoryLoading = false;
+                state.fullHistoryError = '';
                 if (Array.isArray(productsData)) {
                     state.products = productsData.map(p => {
                         if (typeof p === 'object' && p !== null) {
@@ -1280,8 +1352,9 @@
                     }).filter(p => p.name !== '');
                 } else { state.products = []; }
 
-                setCache('TRDAKRA_DATA', { rawItems: itemsData, products: state.products });
+                setCache('TRDAKRA_DATA', { windowDays: INVENTORY_WINDOW_DAYS, rawItems: itemsData, products: state.products });
                 render();
+                if (needsFullHistoryForCurrentView()) ensureFullHistoryLoaded({ renderStart: true });
                 const durationRender = ((performance.now() - startRender) / 1000).toFixed(2);
                 
                 const durationTotal = ((performance.now() - startTotal) / 1000).toFixed(2);
@@ -1290,7 +1363,7 @@
                 }
             } catch (error) {
                 console.error('Error fetching data:', error);
-                if (!getCache('TRDAKRA_DATA', TRD_CACHE_TTL)) alert('ไม่สามารถเชื่อมต่อกับฐานข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
+                if (!hasUsableCache) alert('ไม่สามารถเชื่อมต่อกับฐานข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
             } finally {
                 if (!skipHideLoading) {
                     hideLoading();
@@ -1449,10 +1522,10 @@
                 state.checkStockEdits = {};
                 state.checkStockSearch = '';
             }
-            render();
+            renderOrLoadFullHistory();
         }
-        function setW1Tab(tabName) { state.w1Tab = tabName; render(); }
-        function setW2Tab(tabName) { state.w2Tab = tabName; state.w2BatchEdits = {}; state.w2PartialQty = {}; render(); }
+        function setW1Tab(tabName) { state.w1Tab = tabName; renderOrLoadFullHistory(); }
+        function setW2Tab(tabName) { state.w2Tab = tabName; state.w2BatchEdits = {}; state.w2PartialQty = {}; renderOrLoadFullHistory(); }
 
         async function clearAllStockout() {
             const stockoutItems = state.items.filter(i => i.status === 'สินค้าหมด');
@@ -1547,6 +1620,8 @@
             state.dashboardTab = tab;
             if (tab === 'survey' && state.surveyLogs === null && !state.surveyLogsLoading) {
                 fetchSurveyLogs();
+            } else if (tab === 'product') {
+                renderOrLoadFullHistory();
             } else {
                 render();
             }
@@ -2173,9 +2248,13 @@
         function renderHistoryList(role) {
             state._historyRole = role;
             const allHistory = state.items.filter(i => ['จัดส่งแล้ว', 'รับสินค้าแล้ว', 'จัดส่งไม่ครบ', 'ยกเลิกรายการ'].includes(i.status));
-            if (allHistory.length === 0) return renderEmptyState('ไม่มีประวัติย้อนหลัง', 'history_toggle_off');
+            const historyNotice = renderFullHistoryNotice();
+            if (allHistory.length === 0) {
+                return `<div class="space-y-3">${historyNotice}${renderEmptyState('ไม่มีประวัติย้อนหลัง', 'history_toggle_off')}</div>`;
+            }
 
             return `<div class="space-y-3">
+                ${historyNotice}
                 <div class="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm flex flex-col sm:flex-row gap-2.5">
                     <div class="flex-1">
                         <label for="history-search" class="block text-[11px] font-semibold text-slate-500 mb-1">ค้นหาสินค้า</label>
@@ -2941,9 +3020,11 @@
         }
 
         function renderDashboardProduct() {
-            if (state.productSelected) return renderProductDetail(computeProductAnalytics(state.productSelected));
+            const productNotice = renderFullHistoryNotice();
+            if (state.productSelected) return `${productNotice}${renderProductDetail(computeProductAnalytics(state.productSelected))}`;
 
             return `
+                ${productNotice}
                 <div class="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm">
                     <label for="product-search" class="block text-[11px] font-semibold text-slate-500 mb-1">ค้นหาสินค้า</label>
                     <input id="product-search" type="text" value="${esc(state.productSearch)}" oninput="updateProductSearch(this.value)"
