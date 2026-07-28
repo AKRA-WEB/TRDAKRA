@@ -103,6 +103,8 @@ function formatBangkok(date, timeZone, pattern) {
 function createRuntime(sheets, initialProperties = {}) {
     const spreadsheet = new MockSpreadsheet(sheets);
     const properties = { ...initialProperties };
+    const cacheValues = {};
+    const cacheEvents = [];
     const lineMessages = [];
     const lockEvents = [];
     const lock = {
@@ -127,6 +129,24 @@ function createRuntime(sheets, initialProperties = {}) {
                 return {
                     getProperty(key) { return properties[key] || null; },
                     setProperty(key, value) { properties[key] = String(value); }
+                };
+            }
+        },
+        CacheService: {
+            getScriptCache() {
+                return {
+                    get(key) {
+                        cacheEvents.push(`get:${key}`);
+                        return cacheValues[key] || null;
+                    },
+                    put(key, value) {
+                        cacheEvents.push(`put:${key}`);
+                        cacheValues[key] = String(value);
+                    },
+                    remove(key) {
+                        cacheEvents.push(`remove:${key}`);
+                        delete cacheValues[key];
+                    }
                 };
             }
         },
@@ -160,7 +180,7 @@ function createRuntime(sheets, initialProperties = {}) {
         sendDailyStockSummary,
         testSendDailyStockSummary
     })`, context);
-    return { api, spreadsheet, properties, lineMessages, lockEvents };
+    return { api, spreadsheet, properties, cacheValues, cacheEvents, lineMessages, lockEvents };
 }
 
 const header = ['SurveyDate', 'Floor', 'ProductName', 'CurrentStock', 'ParLevel', 'NeedToOrder', 'Status', 'SurveyedBy'];
@@ -235,6 +255,26 @@ const surveyRow = (date, floor, product, need = 0, user = 'Tester') =>
     assert.strictEqual(response.detailRecordCount, 200);
     assert.ok(response.detailSessionCount <= 30);
     assert.deepStrictEqual(Array.from(response.availableMonths), ['2026_07']);
+
+    const cachedResponse = runtime.api.getSurveyLogMonthly('2026_07');
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(cachedResponse)), JSON.parse(JSON.stringify(response)));
+    assert.strictEqual(runtime.cacheEvents.filter(event => event === 'put:surveyLogMonthly:v1:2026_07').length, 1);
+    assert.strictEqual(runtime.cacheEvents.filter(event => event === 'get:surveyLogMonthly:v1:2026_07').length, 2);
+}
+
+{
+    const runtime = createRuntime(
+        [
+            new MockSheet('SurveyLog', [header]),
+            new MockSheet('SurveyLog_2026_07', [header, surveyRow('01-07-2026 / 10:00 น.', '1', 'A')])
+        ],
+        { SURVEY_LOG_MONTHLY_ENABLED: '1' }
+    );
+    runtime.api.getSurveyLogMonthly('2026_07');
+    assert.ok(runtime.cacheValues['surveyLogMonthly:v1:2026_07']);
+    assert.strictEqual(runtime.api.saveSurveyLog('Tester', '1', [{ name: 'B', currentStock: 1, parLevel: 2 }]), true);
+    assert.strictEqual(runtime.cacheValues['surveyLogMonthly:v1:2026_07'], undefined);
+    assert.ok(runtime.cacheEvents.includes('remove:surveyLogMonthly:v1:2026_07'));
 }
 
 {
