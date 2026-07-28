@@ -152,7 +152,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260704.02";
+        const CURRENT_VERSION = "20260728.01";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -341,6 +341,9 @@
             calendarSelectedDate: null,
             surveyLogs: null,
             surveyLogsLoading: false,
+            surveyLogsError: '',
+            surveyLogsRequestId: 0,
+            surveyMonthKey: `${new Date().getFullYear()}_${String(new Date().getMonth() + 1).padStart(2, '0')}`,
             // Product deep-dive analytics
             productSearch: '',
             productSelected: null,
@@ -1670,17 +1673,45 @@
             return map;
         }
 
-        async function fetchSurveyLogs() {
+        async function fetchSurveyLogs(monthKey) {
+            const selectedMonth = monthKey || state.surveyMonthKey;
+            const requestId = ++state.surveyLogsRequestId;
+            state.surveyMonthKey = selectedMonth;
             state.surveyLogsLoading = true;
+            state.surveyLogsError = '';
             render();
             try {
-                const res = await fetch(`${APPS_SCRIPT_URL}?action=getSurveyLog`);
-                state.surveyLogs = await res.json();
+                const res = await fetch(`${APPS_SCRIPT_URL}?action=getSurveyLogMonthly&month=${encodeURIComponent(selectedMonth)}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                if (!data || data.status !== 'success' || !Array.isArray(data.details)) {
+                    throw new Error(data && data.message ? data.message : 'Invalid SurveyLog response');
+                }
+                if (requestId !== state.surveyLogsRequestId) return;
+                state.surveyLogs = data;
+                state.surveyMonthKey = data.monthKey || selectedMonth;
             } catch(e) {
-                state.surveyLogs = [];
+                if (requestId !== state.surveyLogsRequestId) return;
+                console.error('SurveyLog history error', e);
+                state.surveyLogs = null;
+                state.surveyLogsError = 'โหลดประวัติการสำรวจไม่สำเร็จ กรุณาลองใหม่';
+            } finally {
+                if (requestId !== state.surveyLogsRequestId) return;
+                state.surveyLogsLoading = false;
+                render();
             }
-            state.surveyLogsLoading = false;
-            render();
+        }
+        function selectSurveyMonth(monthKey) {
+            if (!/^\d{4}_(0[1-9]|1[0-2])$/.test(monthKey) || monthKey === state.surveyMonthKey) return;
+            fetchSurveyLogs(monthKey);
+        }
+
+        function formatSurveyMonthLabel(monthKey) {
+            const parts = String(monthKey || '').split('_');
+            if (parts.length !== 2) return monthKey || '-';
+            const date = new Date(Number(parts[0]), Number(parts[1]) - 1, 1);
+            if (isNaN(date.getTime())) return monthKey;
+            return date.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
         }
 
         function addW1Row() {
@@ -3239,62 +3270,63 @@
         function renderDashboardSurvey() {
             if (state.surveyLogsLoading) {
                 return `
-                    <div class="flex flex-col items-center justify-center py-16 gap-3">
-                        <div class="animate-spin rounded-full h-10 w-10 border-[3px] border-brand-blue/20 border-t-brand-orange"></div>
+                    <div role="status" aria-live="polite" class="flex flex-col items-center justify-center py-16 gap-3">
+                        <div aria-hidden="true" class="animate-spin rounded-full h-10 w-10 border-[3px] border-brand-blue/20 border-t-brand-orange"></div>
                         <p class="text-sm text-slate-400 font-medium">กำลังโหลดประวัติสำรวจ...</p>
                     </div>
                 `;
             }
 
-            if (!state.surveyLogs || state.surveyLogs.length === 0) {
+            if (!state.surveyLogs) {
                 return renderEmptyState(
-                    state.surveyLogs === null ? 'ไม่สามารถโหลดข้อมูลได้' : 'ยังไม่มีประวัติการสำรวจ',
-                    state.surveyLogs === null ? 'error_outline' : 'fact_check'
-                ) + `<div class="text-center -mt-2"><button onclick="fetchSurveyLogs()" class="text-sm font-semibold text-brand-blue underline">ลองโหลดใหม่</button></div>`;
+                    state.surveyLogsError || 'ไม่สามารถโหลดข้อมูลได้',
+                    'error_outline'
+                ) + `<div class="text-center -mt-2"><button onclick="fetchSurveyLogs()" class="h-12 px-4 text-sm font-semibold text-brand-blue underline">ลองโหลดใหม่</button></div>`;
             }
 
-            const logs = state.surveyLogs;
-            const now = new Date();
-            const yearBE = String(now.getFullYear() + 543);
-            const monthStr = String(now.getMonth() + 1).padStart(2, '0');
-
-            const thisMonthLogs = logs.filter(l => {
-                const s = String(l.surveyDate || '');
-                return s.includes('-' + monthStr + '-' + yearBE) || s.includes('/' + monthStr + '/');
-            });
-
-            const sessionKeys = new Set(thisMonthLogs.map(l => String(l.surveyDate).split(' / ')[0] + '_' + l.floor + '_' + (l.surveyedBy || '')));
-            const thisMonthCount = sessionKeys.size;
-            const needOrderCount = thisMonthLogs.filter(l => (parseInt(l.needToOrder) || 0) > 0).length;
+            const data = state.surveyLogs;
+            const logs = data.details || [];
+            const summary = data.summary || {};
+            const availableMonths = Array.from(new Set((data.availableMonths || []).concat(state.surveyMonthKey))).sort().reverse();
+            const selectedMonthLabel = formatSurveyMonthLabel(state.surveyMonthKey);
 
             const sessions = {};
-            logs.slice(0, 200).forEach(l => {
-                const dateKey = String(l.surveyDate).split(' / ')[0];
-                const sk = `${dateKey}__${l.floor}__${l.surveyedBy || ''}`;
-                if (!sessions[sk]) sessions[sk] = { date: dateKey, floor: l.floor, surveyedBy: l.surveyedBy || '', items: [] };
+            logs.forEach(l => {
+                const surveyDate = String(l.surveyDate || '');
+                const sk = l.sessionKey || `${surveyDate}__${l.floor}__${l.surveyedBy || ''}`;
+                if (!sessions[sk]) sessions[sk] = { date: surveyDate, floor: l.floor, surveyedBy: l.surveyedBy || '', items: [] };
                 sessions[sk].items.push(l);
             });
 
             const sessionList = Object.values(sessions).slice(0, 30);
 
             return `
+                <div class="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm">
+                    <label for="survey-month-select" class="block text-[11px] font-semibold text-slate-500 mb-1.5">เดือนที่ต้องการดู</label>
+                    <select id="survey-month-select" onchange="selectSurveyMonth(this.value)"
+                            class="w-full h-12 rounded-xl border border-slate-200 bg-slate-50 px-3 text-base font-semibold text-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/20">
+                        ${availableMonths.map(month => `<option value="${month}" ${month === state.surveyMonthKey ? 'selected' : ''}>${esc(formatSurveyMonthLabel(month))}</option>`).join('')}
+                    </select>
+                </div>
+
                 <div class="grid grid-cols-2 gap-4">
                     <div class="bg-emerald-500 p-4 rounded-[1.5rem] text-white relative overflow-hidden shadow-lg shadow-emerald-500/20">
                         <span class="material-icons-round absolute -right-2 -bottom-2 text-[60px] opacity-10">fact_check</span>
-                        <p class="text-[11px] font-semibold text-white/80 uppercase tracking-wider mb-1">สำรวจเดือนนี้</p>
-                        <p class="text-2xl font-bold">${thisMonthCount} <span class="text-xs font-medium text-white/80">ครั้ง</span></p>
+                        <p class="text-[11px] font-semibold text-white/80 tracking-wider mb-1">สำรวจ ${esc(selectedMonthLabel)}</p>
+                        <p class="text-2xl font-bold">${Number(summary.sessionCount || 0).toLocaleString()} <span class="text-xs font-medium text-white/80">ครั้ง</span></p>
                     </div>
                     <div class="bg-amber-500 p-4 rounded-[1.5rem] text-white relative overflow-hidden shadow-lg shadow-amber-500/20">
                         <span class="material-icons-round absolute -right-2 -bottom-2 text-[60px] opacity-10">add_shopping_cart</span>
                         <p class="text-[11px] font-semibold text-white/80 uppercase tracking-wider mb-1">รายการต้องเติม</p>
-                        <p class="text-2xl font-bold">${needOrderCount} <span class="text-xs font-medium text-white/80">รายการ</span></p>
+                        <p class="text-2xl font-bold">${Number(summary.needToOrderCount || 0).toLocaleString()} <span class="text-xs font-medium text-white/80">รายการ</span></p>
                     </div>
                 </div>
 
                 <div>
                     <h3 class="text-sm font-bold text-brand-blue mb-3 flex items-center gap-2 px-1">
-                        <span class="material-icons-round text-brand-orange text-[18px]">history</span> ประวัติการสำรวจ
+                        <span class="material-icons-round text-brand-orange text-[18px]">history</span> ประวัติการสำรวจล่าสุด
                     </h3>
+                    ${sessionList.length === 0 ? renderEmptyState('ยังไม่มีประวัติการสำรวจในเดือนนี้', 'fact_check') : `
                     <div class="space-y-3">
                         ${sessionList.map(session => `
                             <div class="bg-white rounded-[1.5rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100 overflow-hidden">
@@ -3302,7 +3334,7 @@
                                     <span class="material-icons-round text-brand-blue text-[16px]">assignment</span>
                                     <div class="flex-1">
                                         <span class="text-xs font-bold text-brand-blue">${esc(/^\d+$/.test(session.floor) ? 'ชั้น ' + session.floor : session.floor || '-')}</span>
-                                        <span class="text-[10px] text-slate-400 ml-2">${session.date}</span>
+                                        <span class="text-[10px] text-slate-400 ml-2">${esc(session.date)}</span>
                                     </div>
                                     <span class="text-[10px] text-slate-400">โดย: ${esc(session.surveyedBy || '-')}</span>
                                 </div>
@@ -3314,7 +3346,7 @@
                                         const s = getStockStatus(cur, par);
                                         return `
                                             <div class="px-4 py-2 flex items-center gap-2">
-                                                <p class="text-sm text-slate-700 flex-1 truncate">${item.productName}</p>
+                                                <p class="text-sm text-slate-700 flex-1 truncate">${esc(item.productName)}</p>
                                                 <span class="text-[10px] text-slate-400 flex-shrink-0">${cur}/${par}</span>
                                                 ${need > 0 ? `<span class="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded flex-shrink-0">+${need}</span>` : ''}
                                                 <span class="text-[10px] font-semibold ${s.color} ${s.bg} px-1.5 py-0.5 rounded-lg border ${s.border} flex-shrink-0">${s.label}</span>
@@ -3325,10 +3357,12 @@
                             </div>
                         `).join('')}
                     </div>
+                    `}
                 </div>
 
                 <div class="text-center pb-2">
-                    <button onclick="fetchSurveyLogs()" class="text-xs text-slate-400 underline">รีเฟรชข้อมูล</button>
+                    <p class="text-[10px] text-slate-400 mb-2">แสดง ${Number(data.detailSessionCount || 0).toLocaleString()} รอบล่าสุด · ${Number(data.detailRecordCount || 0).toLocaleString()} จาก ${Number(summary.recordCount || 0).toLocaleString()} รายการ</p>
+                    <button onclick="fetchSurveyLogs()" class="h-12 px-4 text-xs text-slate-400 underline">รีเฟรชข้อมูล</button>
                 </div>
             `;
         }
