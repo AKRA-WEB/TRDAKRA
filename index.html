@@ -152,7 +152,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260805.02";
+        const CURRENT_VERSION = "20260805.03";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -348,6 +348,7 @@
             productSearch: '',
             productSelected: null,
             productMovementPeriod: 'week',
+            productMovementWeek: productMovementIsoWeekValue(new Date()),
             productMovementReport: null,
             productMovementLoading: false,
             productMovementError: '',
@@ -3096,7 +3097,8 @@
             render();
             try {
                 const refreshParam = forceRefresh ? '&refresh=1' : '';
-                const url = `${APPS_SCRIPT_URL}?action=getProductMovementReport&period=${encodeURIComponent(state.productMovementPeriod)}${refreshParam}${productMovementPerfParam()}`;
+                const weekParam = state.productMovementPeriod === 'week' ? `&week=${encodeURIComponent(state.productMovementWeek)}` : '';
+                const url = `${APPS_SCRIPT_URL}?action=getProductMovementReport&period=${encodeURIComponent(state.productMovementPeriod)}${weekParam}${refreshParam}${productMovementPerfParam()}`;
                 const response = await fetch(url);
                 if (!response.ok) throw new Error(`http_${response.status}`);
                 const data = await response.json();
@@ -3148,6 +3150,19 @@
         function setProductMovementPeriod(period) {
             if (!['week', '7', '30', '60', '90'].includes(period) || period === state.productMovementPeriod) return;
             state.productMovementPeriod = period;
+            state.productMovementReport = null;
+            state.productSelected = null;
+            state.productMovementDetail = null;
+            fetchProductMovementReport();
+        }
+
+        function setProductMovementWeek(weekValue) {
+            const week = String(weekValue || '').trim();
+            if (!/^\d{4}-W\d{2}$/.test(week)) return;
+            const unchanged = state.productMovementPeriod === 'week' && state.productMovementWeek === week;
+            if (unchanged) return;
+            state.productMovementWeek = week;
+            state.productMovementPeriod = 'week';
             state.productMovementReport = null;
             state.productSelected = null;
             state.productMovementDetail = null;
@@ -3305,7 +3320,25 @@
         }
 
         function productMovementPeriodLabel(period) {
-            return ({ week: 'สัปดาห์นี้', '7': '7 วัน', '30': '30 วัน', '60': '60 วัน', '90': '90 วัน' })[period] || period;
+            return ({ week: 'รายสัปดาห์', '7': '7 วันล่าสุด', '30': '30 วันล่าสุด', '60': '60 วันล่าสุด', '90': '90 วันล่าสุด' })[period] || period;
+        }
+
+        function productMovementIsoWeekValue(dateValue) {
+            const source = dateValue instanceof Date ? dateValue : new Date(dateValue);
+            const bangkok = new Date(source.getTime() + 7 * 60 * 60 * 1000);
+            const date = new Date(Date.UTC(bangkok.getUTCFullYear(), bangkok.getUTCMonth(), bangkok.getUTCDate()));
+            const day = date.getUTCDay() || 7;
+            date.setUTCDate(date.getUTCDate() + 4 - day);
+            const year = date.getUTCFullYear();
+            const yearStart = new Date(Date.UTC(year, 0, 1));
+            const week = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+            return `${year}-W${String(week).padStart(2, '0')}`;
+        }
+
+        function productMovementSelectedPeriodLabel(data = state.productMovementReport) {
+            const period = data && data.period;
+            if (!period || period.key !== 'week') return productMovementPeriodLabel(period ? period.key : state.productMovementPeriod);
+            return period.isCurrentWeek ? 'สัปดาห์นี้' : `วีค ${period.selectedWeek || state.productMovementWeek}`;
         }
 
         function renderMovementLeaderboard(title, icon, products, metric, unitLabel) {
@@ -3393,10 +3426,12 @@
             const summary = data.summary || {};
             const timeOfDay = data.timeOfDay || {};
             const isWeek = data.period && data.period.key === 'week';
-            const currentLabel = isWeek ? 'สัปดาห์นี้' : productMovementPeriodLabel(data.period && data.period.key);
-            const priorLabel = isWeek ? 'สัปดาห์ก่อน' : 'ช่วงก่อนหน้า';
+            const currentLabel = isWeek ? productMovementSelectedPeriodLabel(data) : productMovementPeriodLabel(data.period && data.period.key);
+            const priorLabel = isWeek ? 'วีคก่อนหน้า' : 'ช่วงก่อนหน้า';
             const comparisonSubtitle = isWeek
-                ? 'จันทร์ถึงเวลาปัจจุบัน เทียบกับช่วงเวลาเดียวกันของสัปดาห์ก่อน'
+                ? (data.period.isCurrentWeek
+                    ? 'วีคปัจจุบัน: จันทร์ถึงเวลาปัจจุบัน เทียบช่วงเวลาเดียวกันของวีคก่อน'
+                    : 'วีคย้อนหลัง: เทียบเต็มวันจันทร์–อาทิตย์กับวีคก่อนหน้า')
                 : `${currentLabel} เทียบกับช่วงก่อนหน้าที่มีระยะเวลาเท่ากัน`;
             return `<section class="bg-gradient-to-br from-brand-blue to-blue-800 text-white rounded-2xl shadow-sm p-4">
                 <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
@@ -3425,7 +3460,7 @@
             const leaders = filtered.filter(product => product.fulfilledRounds > 0);
             const frequent = leaders.slice().sort((a, b) => b.fulfilledRounds - a.fulfilledRounds || b.fulfilledQty - a.fulfilledQty).slice(0, 10);
             const volume = leaders.slice().sort((a, b) => b.fulfilledQty - a.fulfilledQty || b.fulfilledRounds - a.fulfilledRounds).slice(0, 10);
-            const periods = ['week', '7', '30', '60', '90'];
+            const rollingPeriods = ['7', '30', '60', '90'];
             const kpis = [
                 ['สินค้าทั้งหมด', summary.masterProductCount, 'inventory_2', 'text-brand-blue bg-blue-50'],
                 ['เคลื่อนไหวในช่วง', summary.movedProductCount, 'local_shipping', 'text-emerald-700 bg-emerald-50'],
@@ -3441,13 +3476,20 @@
                 ${state.productMovementLoading ? '<div role="status" aria-live="polite" class="bg-blue-50 border border-blue-100 text-blue-700 rounded-xl px-3 py-2 text-xs font-bold">กำลังรีเฟรชรายงาน...</div>' : ''}
                 ${state.productMovementError ? `<div role="status" aria-live="polite" class="bg-amber-50 border border-amber-200 text-amber-700 rounded-xl px-3 py-2 text-xs font-bold">${esc(state.productMovementError)} — ยังแสดงข้อมูลเดิมอยู่</div>` : ''}
                 <section class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div><h2 class="text-lg font-black text-brand-blue">รายงานการเคลื่อนไหวสินค้า</h2><p class="text-xs text-slate-500 mt-1">นับการจัดส่งจริง แยกจากคำขอเบิก รายการค้าง สินค้าหมด และยกเลิก</p></div>
-                        <div class="flex flex-wrap gap-1.5">${periods.map(period => `<button onclick="setProductMovementPeriod('${period}')" aria-pressed="${state.productMovementPeriod === period}" class="min-h-11 px-3 rounded-xl text-xs font-bold ${state.productMovementPeriod === period ? 'bg-brand-blue text-white' : 'bg-slate-100 text-slate-600'}">${productMovementPeriodLabel(period)}</button>`).join('')}</div>
+                    <div><h2 class="text-lg font-black text-brand-blue">รายงานการเคลื่อนไหวสินค้า</h2><p class="text-xs text-slate-500 mt-1">นับการจัดส่งจริง แยกจากคำขอเบิก รายการค้าง สินค้าหมด และยกเลิก</p></div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-4">
+                        <div class="rounded-2xl border p-3 ${state.productMovementPeriod === 'week' ? 'border-brand-blue bg-blue-50' : 'border-slate-200 bg-slate-50'}">
+                            <div class="flex items-center gap-2"><span class="material-icons-round text-brand-blue text-[18px]">date_range</span><div><p class="text-xs font-black text-brand-blue">เปรียบเทียบรายสัปดาห์</p><p class="text-[10px] text-slate-500">วีคปฏิทิน จันทร์–อาทิตย์</p></div></div>
+                            <div class="grid grid-cols-[1fr_auto] gap-2 mt-3"><input type="week" aria-label="เลือกสัปดาห์ที่ต้องการเปรียบเทียบ" max="${productMovementIsoWeekValue(new Date())}" value="${esc(state.productMovementWeek)}" onchange="setProductMovementWeek(this.value)" class="h-11 min-w-0 px-3 rounded-xl bg-white border border-slate-200 text-sm font-bold text-slate-700"><button onclick="setProductMovementPeriod('week')" aria-pressed="${state.productMovementPeriod === 'week'}" class="h-11 px-3 rounded-xl text-xs font-bold ${state.productMovementPeriod === 'week' ? 'bg-brand-blue text-white' : 'bg-white text-brand-blue border border-blue-200'}">ใช้สัปดาห์ที่เลือก</button></div>
+                        </div>
+                        <div class="rounded-2xl border p-3 ${state.productMovementPeriod !== 'week' ? 'border-brand-orange bg-orange-50' : 'border-slate-200 bg-slate-50'}">
+                            <div class="flex items-center gap-2"><span class="material-icons-round text-brand-orange text-[18px]">history</span><div><p class="text-xs font-black text-slate-700">ช่วงย้อนหลัง</p><p class="text-[10px] text-slate-500">นับย้อนหลังจากวันนี้ ไม่ใช่วีคปฏิทิน</p></div></div>
+                            <div class="grid grid-cols-4 gap-1.5 mt-3">${rollingPeriods.map(period => `<button onclick="setProductMovementPeriod('${period}')" aria-pressed="${state.productMovementPeriod === period}" class="min-h-11 px-2 rounded-xl text-[11px] font-bold ${state.productMovementPeriod === period ? 'bg-brand-orange text-white' : 'bg-white text-slate-600 border border-slate-200'}">${period} วัน</button>`).join('')}</div>
+                        </div>
                     </div>
                     <div class="mt-3 flex flex-wrap gap-2 text-[10px] text-slate-500">
                         <span>สร้างเมื่อ ${movementDateLabel(data.generatedAt, true)}</span>
-                        <span>· เทียบช่วงก่อนหน้าระยะเท่ากัน</span>
+                        <span>· ${data.period && data.period.key === 'week' ? 'เทียบกับวีคก่อนหน้า' : 'เทียบช่วงก่อนหน้าระยะเท่ากัน'}</span>
                         ${data.cached ? `<span class="font-bold text-amber-600">· ข้อมูลแคชไม่เกิน ${data.maxStaleSeconds || 120} วินาที</span>` : '<span class="font-bold text-emerald-600">· ข้อมูลคำนวณใหม่</span>'}
                         ${data.diagnostics && data.diagnostics.legacyDateFallbacks ? `<span class="font-bold text-violet-600">· ${data.diagnostics.legacyDateFallbacks} รอบใช้วันที่ขอเบิกแทนวันที่จัดส่งเดิม</span>` : ''}
                     </div>
@@ -3500,7 +3542,7 @@
                 <button onclick="clearAnalyticsProduct()" class="min-h-11 text-xs font-bold text-brand-blue inline-flex items-center gap-1"><span class="material-icons-round text-[17px]">arrow_back</span>กลับไปรายงาน</button>
                 <section class="bg-brand-blue text-white rounded-2xl p-5 relative overflow-hidden"><span class="material-icons-round absolute -right-4 -bottom-4 text-[90px] opacity-10">inventory_2</span><h2 class="text-xl font-black pr-10">${esc(product.name)}</h2><p class="text-xs text-white/75 mt-2">${esc(product.isNostk ? 'NOSTK' : [product.floor ? `ชั้น ${product.floor}` : '', product.location || ''].filter(Boolean).join(' · ') || 'ยังไม่ระบุตำแหน่ง')} · Par ${product.parLevel || 0} ${esc(product.unit || 'หน่วย')}</p><span class="inline-block mt-3 text-[10px] font-bold px-2 py-1 rounded-full bg-white/15 border border-white/20">${esc(status.label)}</span></section>
                 <section class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                    <div class="bg-blue-50 rounded-2xl p-3"><p class="text-[10px] text-blue-600">ขอเบิก ${productMovementPeriodLabel(state.productMovementPeriod)}</p><p class="text-xl font-black text-blue-800">${product.requestedRounds} รอบ</p><p class="text-xs text-blue-600">${product.requestedQty.toLocaleString()} ${esc(product.unit)}</p></div>
+                    <div class="bg-blue-50 rounded-2xl p-3"><p class="text-[10px] text-blue-600">ขอเบิก ${productMovementSelectedPeriodLabel()}</p><p class="text-xl font-black text-blue-800">${product.requestedRounds} รอบ</p><p class="text-xs text-blue-600">${product.requestedQty.toLocaleString()} ${esc(product.unit)}</p></div>
                     <div class="bg-emerald-50 rounded-2xl p-3"><p class="text-[10px] text-emerald-600">จัดส่งจริง</p><p class="text-xl font-black text-emerald-800">${product.fulfilledRounds} รอบ</p><p class="text-xs text-emerald-600">${product.fulfilledQty.toLocaleString()} ${esc(product.unit)}</p></div>
                     <div class="bg-orange-50 rounded-2xl p-3"><p class="text-[10px] text-orange-600">แนวโน้มปริมาณ</p><p class="text-lg mt-1">${movementTrendLabel(product.qtyTrendPct)}</p><p class="text-[10px] text-orange-500">ช่วงก่อน ${product.priorFulfilledQty.toLocaleString()}</p></div>
                     <div class="bg-slate-100 rounded-2xl p-3"><p class="text-[10px] text-slate-500">Fulfillment / Lead time</p><p class="text-lg font-black text-slate-700">${movementMetric(product.fulfillmentRate, '%')}</p><p class="text-[10px] text-slate-500">${movementMetric(product.medianLeadTimeHours, ' ชม.')}</p></div>

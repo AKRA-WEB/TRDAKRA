@@ -20,7 +20,24 @@ function inventoryRow({
     ];
 }
 
+function bangkokDate(year, month, day, hour = 0, minute = 0) {
+    return new Date(Date.UTC(year, month, day, hour, minute) - 7 * 60 * 60 * 1000);
+}
+
 function createRuntime() {
+    const cacheValues = {};
+    const scriptCache = {
+        get(key) { return Object.prototype.hasOwnProperty.call(cacheValues, key) ? cacheValues[key] : null; },
+        getAll(keys) {
+            return keys.reduce((found, key) => {
+                if (Object.prototype.hasOwnProperty.call(cacheValues, key)) found[key] = cacheValues[key];
+                return found;
+            }, {});
+        },
+        put(key, value) { cacheValues[key] = value; },
+        putAll(entries) { Object.assign(cacheValues, entries); },
+        remove(key) { delete cacheValues[key]; }
+    };
     const context = {
         console,
         Date,
@@ -36,7 +53,7 @@ function createRuntime() {
         isFinite,
         isNaN,
         PropertiesService: { getScriptProperties() { return { getProperty() { return null; }, setProperty() {} }; } },
-        CacheService: { getScriptCache() { return { get() { return null; }, put() {}, remove() {} }; } },
+        CacheService: { getScriptCache() { return scriptCache; } },
         SpreadsheetApp: { openById() { throw new Error('Spreadsheet access is not expected in helper tests'); } },
         LockService: { getScriptLock() { return { waitLock() {}, releaseLock() {} }; } },
         Utilities: { formatDate(date) { return date.toISOString(); } },
@@ -49,6 +66,7 @@ function createRuntime() {
     vm.createContext(context);
     const source = fs.readFileSync(path.join(__dirname, '..', 'Code.gs.txt'), 'utf8');
     vm.runInContext(source, context, { filename: 'Code.gs.txt' });
+    vm.runInContext('getProductMovementInventoryRows_ = function() { return []; }; getProductList = function() { return []; };', context);
     return vm.runInContext(`({
         parseMovementPeriod_,
         buildProductMovementReport_,
@@ -58,12 +76,13 @@ function createRuntime() {
         utf8ByteLength_,
         writeProductMovementCache_,
         readProductMovementCache_,
-        getCachedProductMovementReport_
+        getCachedProductMovementReport_,
+        getProductMovementReport
     })`, context);
 }
 
 const api = createRuntime();
-const now = new Date(2026, 7, 5, 12, 0, 0, 0);
+const now = new Date('2026-08-05T12:00:00+07:00');
 const products = [
     { name: 'สินค้า A', unit: 'ลัง', floor: '1', location: 'A1', parLevel: 20 },
     { name: 'สินค้า B', unit: 'ชิ้น', floor: '2', location: 'B1', parLevel: 10 },
@@ -75,17 +94,17 @@ const products = [
 
 const rows = [
     // Request and dispatch belong to different periods: demand uses requestAt, movement uses dispatchAt.
-    inventoryRow({ id: 'A-PART', requestAt: new Date(2026, 7, 2, 9), name: 'สินค้า A', requestQty: 10, status: 'จัดส่งไม่ครบ', receiveQty: 6, dispatchAt: new Date(2026, 7, 4, 10) }),
-    inventoryRow({ id: 'A-FULL', requestAt: new Date(2026, 7, 3, 9), name: 'สินค้า A', requestQty: 4, status: 'จัดส่งแล้ว', receiveQty: 4, dispatchAt: new Date(2026, 7, 3, 11) }),
-    inventoryRow({ id: 'A-PRIOR', requestAt: new Date(2026, 6, 28, 8), name: 'สินค้า A', requestQty: 5, status: 'รับสินค้าแล้ว', receiveQty: 5, dispatchAt: new Date(2026, 6, 28, 9) }),
-    inventoryRow({ id: 'B-PENDING', requestAt: new Date(2026, 7, 4, 8), name: 'สินค้า B', requestQty: 8, status: 'กำลังจัดสินค้า' }),
-    inventoryRow({ id: 'B-OLD-PENDING', requestAt: new Date(2026, 5, 1, 8), name: 'สินค้า B', requestQty: 2, status: 'สั่งเบิก' }),
-    inventoryRow({ id: 'C-OLD', requestAt: new Date(2026, 3, 1, 8), name: 'สินค้า C', requestQty: 3, status: 'จัดส่งแล้ว', receiveQty: 3, dispatchAt: new Date(2026, 3, 1, 9) }),
-    inventoryRow({ id: 'E-HISTORY', requestAt: new Date(2026, 7, 5, 8), name: 'สินค้า E', requestQty: 9, status: 'จัดส่งแล้ว', receiveQty: 9, dispatchAt: new Date(2026, 7, 5, 9) }),
-    inventoryRow({ id: 'F-STOCKOUT', requestAt: new Date(2026, 5, 1, 8), name: 'สินค้า F', requestQty: 7, status: 'สินค้าหมด', dispatchAt: new Date(2026, 7, 4, 9) }),
-    inventoryRow({ id: 'G-LEGACY', requestAt: new Date(2026, 7, 5, 7), name: 'สินค้า G', requestQty: 2, status: 'จัดส่งแล้ว', receiveQty: 2 }),
-    inventoryRow({ id: 'CANCELLED', requestAt: new Date(2026, 5, 1, 7), name: 'สินค้า B', requestQty: 99, status: 'ยกเลิกรายการ', dispatchAt: new Date(2026, 7, 5, 7) }),
-    inventoryRow({ id: 'VARIANT', requestAt: new Date(2026, 7, 5, 6), name: 'สินค้า a', requestQty: 1, status: 'สั่งเบิก' })
+    inventoryRow({ id: 'A-PART', requestAt: bangkokDate(2026, 7, 2, 9), name: 'สินค้า A', requestQty: 10, status: 'จัดส่งไม่ครบ', receiveQty: 6, dispatchAt: bangkokDate(2026, 7, 4, 10) }),
+    inventoryRow({ id: 'A-FULL', requestAt: bangkokDate(2026, 7, 3, 9), name: 'สินค้า A', requestQty: 4, status: 'จัดส่งแล้ว', receiveQty: 4, dispatchAt: bangkokDate(2026, 7, 3, 11) }),
+    inventoryRow({ id: 'A-PRIOR', requestAt: bangkokDate(2026, 6, 28, 8), name: 'สินค้า A', requestQty: 5, status: 'รับสินค้าแล้ว', receiveQty: 5, dispatchAt: bangkokDate(2026, 6, 28, 9) }),
+    inventoryRow({ id: 'B-PENDING', requestAt: bangkokDate(2026, 7, 4, 8), name: 'สินค้า B', requestQty: 8, status: 'กำลังจัดสินค้า' }),
+    inventoryRow({ id: 'B-OLD-PENDING', requestAt: bangkokDate(2026, 5, 1, 8), name: 'สินค้า B', requestQty: 2, status: 'สั่งเบิก' }),
+    inventoryRow({ id: 'C-OLD', requestAt: bangkokDate(2026, 3, 1, 8), name: 'สินค้า C', requestQty: 3, status: 'จัดส่งแล้ว', receiveQty: 3, dispatchAt: bangkokDate(2026, 3, 1, 9) }),
+    inventoryRow({ id: 'E-HISTORY', requestAt: bangkokDate(2026, 7, 5, 8), name: 'สินค้า E', requestQty: 9, status: 'จัดส่งแล้ว', receiveQty: 9, dispatchAt: bangkokDate(2026, 7, 5, 9) }),
+    inventoryRow({ id: 'F-STOCKOUT', requestAt: bangkokDate(2026, 5, 1, 8), name: 'สินค้า F', requestQty: 7, status: 'สินค้าหมด', dispatchAt: bangkokDate(2026, 7, 4, 9) }),
+    inventoryRow({ id: 'G-LEGACY', requestAt: bangkokDate(2026, 7, 5, 7), name: 'สินค้า G', requestQty: 2, status: 'จัดส่งแล้ว', receiveQty: 2 }),
+    inventoryRow({ id: 'CANCELLED', requestAt: bangkokDate(2026, 5, 1, 7), name: 'สินค้า B', requestQty: 99, status: 'ยกเลิกรายการ', dispatchAt: bangkokDate(2026, 7, 5, 7) }),
+    inventoryRow({ id: 'VARIANT', requestAt: bangkokDate(2026, 7, 5, 6), name: 'สินค้า a', requestQty: 1, status: 'สั่งเบิก' })
 ];
 
 {
@@ -159,13 +178,75 @@ const rows = [
 }
 
 {
+    const legacyEndpoint = api.getProductMovementReport('week', true, false);
+    assert.strictEqual(legacyEndpoint.status, 'success', 'legacy three-argument endpoint signature remains supported');
+    assert.match(legacyEndpoint.period.selectedWeek, /^\d{4}-W\d{2}$/);
+
+    const selectedEndpoint = api.getProductMovementReport('week', '2026-W31', true, false);
+    assert.strictEqual(selectedEndpoint.status, 'success');
+    assert.strictEqual(selectedEndpoint.period.selectedWeek, '2026-W31', 'public report endpoint forwards the selected week');
+    assert.strictEqual(selectedEndpoint.period.isCurrentWeek, false);
+    const rollingEndpoint = api.getProductMovementReport('7', '2026-W31', true, false);
+    assert.strictEqual(rollingEndpoint.period.selectedWeek, null, 'rolling periods ignore the calendar-week selector');
+}
+
+{
     const period = api.parseMovementPeriod_('week', now);
-    assert.strictEqual(period.start.getDay(), 1, 'this-week period starts on Monday');
-    assert.strictEqual(period.start.getHours(), 0);
+    assert.strictEqual(period.start.toISOString(), '2026-08-02T17:00:00.000Z', 'this-week period starts Monday 00:00 Bangkok');
     assert.strictEqual(period.end.getTime(), now.getTime());
     assert.strictEqual(period.priorEnd.getTime() - period.priorStart.getTime(), period.end.getTime() - period.start.getTime());
-    assert.strictEqual(period.priorStart.getDay(), 1, 'comparison starts on the previous Monday');
-    assert.strictEqual(period.priorEnd.getDay(), 3, 'comparison ends at the same elapsed point in the previous week');
+    assert.strictEqual(period.priorStart.toISOString(), '2026-07-26T17:00:00.000Z', 'comparison starts on the previous Bangkok Monday');
+    assert.strictEqual(period.priorEnd.toISOString(), '2026-07-29T05:00:00.000Z', 'comparison ends at the same Bangkok-local elapsed point in the previous week');
+}
+
+{
+    const selected = api.parseMovementPeriod_('week', now, '2026-W31');
+    assert.strictEqual(selected.selectedWeek, '2026-W31');
+    assert.strictEqual(selected.isCurrentWeek, false);
+    assert.strictEqual(selected.start.toISOString(), '2026-07-26T17:00:00.000Z', 'selected ISO week starts Monday 27 July in Bangkok');
+    assert.strictEqual(selected.end.toISOString(), '2026-08-02T16:59:59.999Z', 'past selected week ends Sunday 2 August in Bangkok');
+    assert.strictEqual(selected.priorStart.toISOString(), '2026-07-19T17:00:00.000Z');
+    assert.strictEqual(selected.priorEnd.toISOString(), '2026-07-26T16:59:59.999Z');
+}
+
+{
+    const current = api.parseMovementPeriod_('week', now, '2026-W32');
+    assert.strictEqual(current.isCurrentWeek, true);
+    assert.strictEqual(current.end.getTime(), now.getTime(), 'explicit current week remains partial through now');
+    const crossYear = api.parseMovementPeriod_('week', new Date('2026-01-10T12:00:00+07:00'), '2026-W01');
+    assert.strictEqual(crossYear.start.toISOString(), '2025-12-28T17:00:00.000Z', 'ISO week 1 can start in the preceding calendar year');
+    assert.strictEqual(crossYear.end.toISOString(), '2026-01-04T16:59:59.999Z');
+    assert.throws(() => api.parseMovementPeriod_('week', now, '2026-W33'), /future_week/);
+    assert.throws(() => api.parseMovementPeriod_('week', now, '2026-W54'), /invalid_week/);
+}
+
+{
+    const bangkokMonday = new Date('2026-08-09T18:00:00.000Z');
+    const period = api.parseMovementPeriod_('week', bangkokMonday);
+    assert.strictEqual(period.selectedWeek, '2026-W33', 'Sunday UTC is already Monday of the next ISO week in Bangkok');
+    assert.strictEqual(period.start.toISOString(), '2026-08-09T17:00:00.000Z');
+}
+
+{
+    const boundary = new Date('2026-07-26T16:59:59.999Z');
+    const boundaryRows = [
+        inventoryRow({ id: 'PRIOR-END', requestAt: boundary, name: 'สินค้า A', requestQty: 3, status: 'จัดส่งแล้ว', receiveQty: 3, dispatchAt: boundary })
+    ];
+    const report = api.buildProductMovementReport_(boundaryRows, products, 'week', now, '2026-W31');
+    const productA = report.products.find(product => product.name === 'สินค้า A');
+    assert.strictEqual(report.summary.priorRequestedRounds, 1, 'exact priorEnd request remains inside the prior full week');
+    assert.strictEqual(productA.priorFulfilledRounds, 1, 'exact priorEnd dispatch remains inside the prior full week');
+}
+
+{
+    const report = api.buildProductMovementReport_(rows, products, 'week', now, '2026-W31');
+    assert.strictEqual(report.period.selectedWeek, '2026-W31');
+    assert.strictEqual(report.period.isCurrentWeek, false);
+    const productA = report.products.find(product => product.name === 'สินค้า A');
+    assert.strictEqual(productA.requestedRounds, 2, 'selected past week uses its own Monday-Sunday request window');
+    assert.strictEqual(productA.requestedQty, 15);
+    assert.strictEqual(productA.fulfilledRounds, 1);
+    assert.strictEqual(productA.fulfilledQty, 5);
 }
 
 {
