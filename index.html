@@ -152,7 +152,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260728.01";
+        const CURRENT_VERSION = "20260805.02";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -347,6 +347,22 @@
             // Product deep-dive analytics
             productSearch: '',
             productSelected: null,
+            productMovementPeriod: 'week',
+            productMovementReport: null,
+            productMovementLoading: false,
+            productMovementError: '',
+            productMovementRequestId: 0,
+            productMovementSearch: '',
+            productMovementFloor: '',
+            productMovementLocation: '',
+            productMovementState: 'all',
+            productMovementSort: 'frequency',
+            productMovementIncludeNostk: false,
+            productMovementLimit: 50,
+            productMovementDetail: null,
+            productMovementDetailLoading: false,
+            productMovementDetailError: '',
+            productMovementDetailRequestId: 0,
             fullHistoryLoaded: false,
             fullHistoryLoading: false,
             fullHistoryError: ''
@@ -1387,6 +1403,10 @@
             if (data && (data.status === 'error' || data.success === false)) {
                 throw new Error(data.reason || data.message || 'save_failed');
             }
+            if (Array.isArray(payload) || ['mutateInventoryDelta', 'updateProductDetails', 'updateProductDetailsBatch'].includes(payload && payload.action)) {
+                state.productMovementReport = null;
+                state.productMovementDetail = null;
+            }
             return data;
         }
 
@@ -1624,7 +1644,8 @@
             if (tab === 'survey' && state.surveyLogs === null && !state.surveyLogsLoading) {
                 fetchSurveyLogs();
             } else if (tab === 'product') {
-                renderOrLoadFullHistory();
+                if ((!state.productMovementReport || productMovementReportIsStale()) && !state.productMovementLoading) fetchProductMovementReport();
+                else render();
             } else {
                 render();
             }
@@ -2479,7 +2500,7 @@
             ];
 
             return `
-                <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative animate-fade-in">
+                <div class="w-full ${state.dashboardTab === 'product' ? 'max-w-6xl' : 'max-w-md'} bg-[#f8fafc] min-h-screen flex flex-col relative animate-fade-in">
                     <header class="bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
                         <div class="flex items-center gap-2">
                             <button onclick="setView('home')" aria-label="กลับหน้าหลัก" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
@@ -2489,19 +2510,19 @@
                                 <span class="material-icons-round text-[20px] text-white">insights</span> ข้อมูลเชิงลึก (Analytics)
                             </h1>
                         </div>
-                        <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white" title="รีเฟรชข้อมูล">
+                        <button onclick="${state.dashboardTab === 'product' ? 'fetchProductMovementReport(true)' : 'fetchInitialData(true)'}" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white" title="รีเฟรชข้อมูล">
                             <span class="material-icons-round text-[20px]">refresh</span>
                         </button>
                     </header>
 
-                    <div class="bg-white px-4 py-3 shadow-sm sticky top-[60px] z-10 border-b border-slate-100 flex justify-center">
+                    ${state.dashboardTab === 'product' ? '' : `<div class="bg-white px-4 py-3 shadow-sm sticky top-[60px] z-10 border-b border-slate-100 flex justify-center">
                         <div class="bg-slate-100 p-1 rounded-xl flex w-full max-w-[250px]">
                             <button onclick="setDashboardFilter('week')" class="flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${filter === 'week' ? 'bg-white text-brand-blue shadow-sm' : 'text-slate-400 hover:text-slate-600'}">สัปดาห์นี้</button>
                             <button onclick="setDashboardFilter('month')" class="flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${filter === 'month' ? 'bg-white text-brand-blue shadow-sm' : 'text-slate-400 hover:text-slate-600'}">เดือนนี้</button>
                         </div>
-                    </div>
+                    </div>`}
 
-                    <div class="bg-white sticky top-[108px] z-10 border-b border-slate-100 flex">
+                    <div class="bg-white sticky ${state.dashboardTab === 'product' ? 'top-[60px]' : 'top-[108px]'} z-10 border-b border-slate-100 flex">
                         ${TABS.map(t => `
                             <button onclick="setDashboardTab('${t.id}')"
                                     class="flex-1 py-2.5 flex flex-col items-center gap-0.5 transition-colors ${state.dashboardTab === t.id ? 'text-brand-blue border-b-2 border-brand-blue bg-blue-50/50' : 'text-slate-400 hover:text-slate-500'}">
@@ -2511,7 +2532,7 @@
                         `).join('')}
                     </div>
 
-                    <main class="flex-1 overflow-y-auto p-5 pb-24 space-y-6">
+                    <main class="flex-1 overflow-y-auto ${state.dashboardTab === 'product' ? 'p-4 sm:p-6' : 'p-5'} pb-24 space-y-6">
                         ${state.dashboardTab === 'product' ? '' : renderFullHistoryNotice()}
                         ${state.dashboardTab === 'summary'  ? renderDashboardSummary(dispatchedItems, state.items, startDate) :
                           state.dashboardTab === 'product'  ? renderDashboardProduct() :
@@ -3036,35 +3057,206 @@
 
         function updateProductSearch(value) {
             state.productSearch = value;
-            const el = document.getElementById('product-search-results');
-            if (el) el.innerHTML = renderProductLanding();
+            state.productMovementSearch = value;
+            state.productMovementLimit = 50;
+            render();
         }
         function productNameJsArg(name) {
             return jsArg(name);
         }
         function selectAnalyticsProduct(name) {
             state.productSelected = String(name || '');
-            render();
+            state.productMovementDetail = null;
+            state.productMovementDetailError = '';
+            fetchProductMovementDetail(state.productSelected);
         }
         function clearAnalyticsProduct() {
             state.productSelected = null;
+            state.productMovementDetail = null;
+            state.productMovementDetailError = '';
             render();
         }
 
-        function renderDashboardProduct() {
-            const productNotice = renderFullHistoryNotice();
-            if (state.productSelected) return `${productNotice}${renderProductDetail(computeProductAnalytics(state.productSelected))}`;
+        function productMovementPerfParam() {
+            return window.location.search.includes('perf=1') ? '&perf=1' : '';
+        }
 
-            return `
-                ${productNotice}
-                <div class="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm">
-                    <label for="product-search" class="block text-[11px] font-semibold text-slate-500 mb-1">ค้นหาสินค้า</label>
-                    <input id="product-search" type="text" value="${esc(state.productSearch)}" oninput="updateProductSearch(this.value)"
-                        placeholder="🔍 พิมพ์ชื่อสินค้า เช่น แป้งห่าน..."
-                        class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-brand-blue transition-all">
-                </div>
-                <div id="product-search-results">${renderProductLanding()}</div>
-            `;
+        function productMovementReportIsStale() {
+            const report = state.productMovementReport;
+            if (!report || !report.generatedAt) return true;
+            const generatedAt = new Date(report.generatedAt).getTime();
+            if (!Number.isFinite(generatedAt)) return true;
+            return Date.now() - generatedAt > Number(report.maxStaleSeconds || 120) * 1000;
+        }
+
+        async function fetchProductMovementReport(forceRefresh = false) {
+            const requestId = ++state.productMovementRequestId;
+            state.productMovementLoading = true;
+            state.productMovementError = '';
+            render();
+            try {
+                const refreshParam = forceRefresh ? '&refresh=1' : '';
+                const url = `${APPS_SCRIPT_URL}?action=getProductMovementReport&period=${encodeURIComponent(state.productMovementPeriod)}${refreshParam}${productMovementPerfParam()}`;
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`http_${response.status}`);
+                const data = await response.json();
+                if (!data || data.status !== 'success' || !Array.isArray(data.products)) {
+                    throw new Error(data && data.reason ? data.reason : 'invalid_report_response');
+                }
+                if (requestId !== state.productMovementRequestId) return;
+                state.productMovementReport = data;
+                if (state.productSelected) fetchProductMovementDetail(state.productSelected);
+            } catch (error) {
+                if (requestId !== state.productMovementRequestId) return;
+                console.error('Product movement report failed:', error);
+                state.productMovementError = 'โหลดรายงานการเคลื่อนไหวสินค้าไม่สำเร็จ';
+            } finally {
+                if (requestId !== state.productMovementRequestId) return;
+                state.productMovementLoading = false;
+                render();
+            }
+        }
+
+        async function fetchProductMovementDetail(productName) {
+            const target = String(productName || '').trim();
+            if (!target) return;
+            const requestId = ++state.productMovementDetailRequestId;
+            state.productMovementDetailLoading = true;
+            state.productMovementDetailError = '';
+            render();
+            try {
+                const url = `${APPS_SCRIPT_URL}?action=getProductMovementDetail&product=${encodeURIComponent(target)}&limit=30${productMovementPerfParam()}`;
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`http_${response.status}`);
+                const data = await response.json();
+                if (!data || data.status !== 'success' || !Array.isArray(data.records)) {
+                    throw new Error(data && data.reason ? data.reason : 'invalid_detail_response');
+                }
+                if (requestId !== state.productMovementDetailRequestId || state.productSelected !== target) return;
+                state.productMovementDetail = data;
+            } catch (error) {
+                if (requestId !== state.productMovementDetailRequestId) return;
+                console.error('Product movement detail failed:', error);
+                state.productMovementDetailError = 'โหลดประวัติรายรอบไม่สำเร็จ';
+            } finally {
+                if (requestId !== state.productMovementDetailRequestId) return;
+                state.productMovementDetailLoading = false;
+                render();
+            }
+        }
+
+        function setProductMovementPeriod(period) {
+            if (!['week', '7', '30', '60', '90'].includes(period) || period === state.productMovementPeriod) return;
+            state.productMovementPeriod = period;
+            state.productMovementReport = null;
+            state.productSelected = null;
+            state.productMovementDetail = null;
+            fetchProductMovementReport();
+        }
+
+        function setProductMovementFilter(field, value) {
+            const fields = {
+                floor: 'productMovementFloor',
+                location: 'productMovementLocation',
+                state: 'productMovementState',
+                sort: 'productMovementSort'
+            };
+            if (!fields[field]) return;
+            state[fields[field]] = value;
+            if (field === 'floor') state.productMovementLocation = '';
+            state.productMovementLimit = 50;
+            render();
+        }
+
+        function toggleProductMovementNostk() {
+            state.productMovementIncludeNostk = !state.productMovementIncludeNostk;
+            state.productMovementLimit = 50;
+            render();
+        }
+
+        function loadMoreProductMovements() {
+            state.productMovementLimit += 50;
+            render();
+        }
+
+        function movementDateLabel(value, includeTime = false) {
+            if (!value) return '-';
+            const date = new Date(value);
+            if (isNaN(date.getTime())) return '-';
+            const options = { timeZone: 'Asia/Bangkok', day: '2-digit', month: '2-digit', year: 'numeric' };
+            if (includeTime) Object.assign(options, { hour: '2-digit', minute: '2-digit', hour12: false });
+            return date.toLocaleString('th-TH', options).replace(/\//g, '-');
+        }
+
+        function movementMetric(value, suffix = '') {
+            return value === null || value === undefined ? 'ข้อมูลไม่พอ' : `${Number(value).toLocaleString()}${suffix}`;
+        }
+
+        function movementTrendLabel(value) {
+            if (value === null || value === undefined) return '<span class="text-slate-400">ข้อมูลเทียบไม่พอ</span>';
+            if (value === 0) return '<span class="text-slate-400">คงที่ 0%</span>';
+            const up = value > 0;
+            return `<span class="${up ? 'text-emerald-600' : 'text-rose-600'} font-bold inline-flex items-center gap-0.5"><span class="material-icons-round text-[13px]">${up ? 'north_east' : 'south_east'}</span>${Math.abs(value)}%</span>`;
+        }
+
+        function movementStateMeta(product) {
+            if (!product.inProductMaster) return { label: 'มีเฉพาะในประวัติ', cls: 'bg-violet-50 text-violet-700 border-violet-200' };
+            if (product.movementState === 'never') return { label: 'ไม่พบประวัติเคลื่อนไหว', cls: 'bg-slate-100 text-slate-600 border-slate-200' };
+            if (product.movementState === 'active') return { label: 'เคลื่อนไหวในช่วงนี้', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+            if (product.daysInactive >= 90) return { label: `ไม่เคลื่อนไหว ${product.daysInactive} วัน`, cls: 'bg-rose-50 text-rose-700 border-rose-200' };
+            if (product.daysInactive >= 60) return { label: `ไม่เคลื่อนไหว ${product.daysInactive} วัน`, cls: 'bg-orange-50 text-orange-700 border-orange-200' };
+            if (product.daysInactive >= 30) return { label: `ไม่เคลื่อนไหว ${product.daysInactive} วัน`, cls: 'bg-amber-50 text-amber-700 border-amber-200' };
+            return { label: `ล่าสุด ${product.daysInactive} วันก่อน`, cls: 'bg-blue-50 text-blue-700 border-blue-200' };
+        }
+
+        function productMovementAttention(product) {
+            return product.pendingRounds > 0 || product.partialCount > 0 || product.stockoutCount > 0 ||
+                product.cancelledCount > 0 || (product.qtyTrendPct !== null && product.qtyTrendPct <= -50);
+        }
+
+        function getFilteredProductMovements() {
+            const report = state.productMovementReport;
+            if (!report) return [];
+            const query = state.productMovementSearch.toLowerCase().trim();
+            const rows = report.products.filter(product => {
+                if (!state.productMovementIncludeNostk && product.isNostk) return false;
+                if (state.productMovementFloor && product.floor !== state.productMovementFloor) return false;
+                if (state.productMovementLocation && product.location !== state.productMovementLocation) return false;
+                if (query && !`${product.name} ${product.floor || ''} ${product.location || ''}`.toLowerCase().includes(query)) return false;
+                if (state.productMovementState === 'active' && product.movementState !== 'active') return false;
+                if (state.productMovementState === 'inactive30' && !(product.daysInactive >= 30)) return false;
+                if (state.productMovementState === 'inactive60' && !(product.daysInactive >= 60)) return false;
+                if (state.productMovementState === 'inactive90' && !(product.daysInactive >= 90)) return false;
+                if (state.productMovementState === 'never' && product.movementState !== 'never') return false;
+                if (state.productMovementState === 'attention' && !productMovementAttention(product)) return false;
+                if (state.productMovementState === 'historyOnly' && product.inProductMaster) return false;
+                return true;
+            });
+            return rows.sort((a, b) => {
+                if (state.productMovementSort === 'quantity') return b.fulfilledQty - a.fulfilledQty || b.fulfilledRounds - a.fulfilledRounds;
+                if (state.productMovementSort === 'inactive') return (b.daysInactive ?? -1) - (a.daysInactive ?? -1);
+                if (state.productMovementSort === 'name') return a.name.localeCompare(b.name, 'th');
+                return b.fulfilledRounds - a.fulfilledRounds || b.fulfilledQty - a.fulfilledQty;
+            });
+        }
+
+        function renderDashboardProduct() {
+            if (state.productMovementLoading && !state.productMovementReport) {
+                return `<div role="status" class="py-20 text-center"><div class="animate-spin rounded-full h-10 w-10 border-[3px] border-brand-blue/20 border-t-brand-orange mx-auto"></div><p class="text-sm text-slate-500 mt-3">กำลังสร้างรายงานการเคลื่อนไหว...</p></div>`;
+            }
+            if (!state.productMovementReport) {
+                const fallback = state.productSelected
+                    ? renderLegacyProductDetail(computeProductAnalytics(state.productSelected))
+                    : `<div class="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm"><label for="product-search" class="block text-[11px] font-semibold text-slate-500 mb-1">ค้นหาในข้อมูลล่าสุด</label><input id="product-search" type="text" value="${esc(state.productSearch)}" oninput="updateProductSearch(this.value)" class="w-full h-12 px-3 bg-slate-50 border border-slate-200 rounded-xl text-base"></div>${renderLegacyProductLanding()}`;
+                return `<div class="bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl p-4 flex items-start gap-3"><span class="material-icons-round">error_outline</span><div class="flex-1"><p class="text-sm font-bold">${esc(state.productMovementError || 'ยังไม่มีข้อมูลรายงาน')}</p><p class="text-xs mt-1">มุมมองด้านล่างใช้เฉพาะข้อมูลล่าสุดในเครื่อง</p><button onclick="fetchProductMovementReport(true)" class="mt-2 h-11 px-4 rounded-xl bg-white border border-rose-200 font-bold text-xs">ลองโหลดรายงานอีกครั้ง</button></div></div>${fallback}`;
+            }
+            if (state.productSelected) return renderProductMovementDetail();
+            return renderProductMovementOverview();
+        }
+
+        // Legacy recent-data landing remains as a compatibility fallback until GAS/frontend rollout is complete.
+        function renderLegacyProductLanding() {
+            return renderProductLanding();
         }
 
         // landing: ถ้ามีคำค้นหา โชว์ผลค้นหา ไม่งั้นโชว์สินค้าเคลื่อนไหวเร็ว 3 วัน
@@ -3112,6 +3304,217 @@
             `;
         }
 
+        function productMovementPeriodLabel(period) {
+            return ({ week: 'สัปดาห์นี้', '7': '7 วัน', '30': '30 วัน', '60': '60 วัน', '90': '90 วัน' })[period] || period;
+        }
+
+        function renderMovementLeaderboard(title, icon, products, metric, unitLabel) {
+            return `<section class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+                <h3 class="text-sm font-bold text-brand-blue flex items-center gap-2 mb-3"><span class="material-icons-round text-brand-orange text-[18px]">${icon}</span>${title}</h3>
+                ${products.length === 0 ? '<p class="text-xs text-slate-400 py-6 text-center">ไม่มีข้อมูลตามตัวกรอง</p>' : `<div class="space-y-2">${products.map((product, index) => `
+                    <button onclick="selectAnalyticsProduct(${productNameJsArg(product.name)})" class="w-full min-h-12 text-left flex items-center gap-3 rounded-xl hover:bg-slate-50 px-2 py-2">
+                        <span class="w-7 h-7 rounded-full bg-brand-blue/10 text-brand-blue flex items-center justify-center text-xs font-bold">${index + 1}</span>
+                        <span class="flex-1 min-w-0"><span class="block text-xs font-bold text-slate-700 truncate">${esc(product.name)}</span><span class="block text-[10px] text-slate-400">${product.fulfilledRounds} รอบ · ${product.fulfilledQty.toLocaleString()} ${esc(product.unit || 'หน่วย')}</span></span>
+                        <span class="text-xs font-black text-brand-orange">${Number(product[metric] || 0).toLocaleString()} ${unitLabel}</span>
+                    </button>`).join('')}</div>`}
+            </section>`;
+        }
+
+        function renderProductMovementCard(product) {
+            const status = movementStateMeta(product);
+            const attention = [];
+            if (product.pendingRounds) attention.push(`ค้าง ${product.pendingRounds} รอบ`);
+            if (product.partialCount) attention.push(`ส่งไม่ครบ ${product.partialCount}`);
+            if (product.stockoutCount) attention.push(`หมด ${product.stockoutCount}`);
+            if (product.cancelledCount) attention.push(`ยกเลิก ${product.cancelledCount}`);
+            const location = product.isNostk ? 'NOSTK' : [product.floor ? `ชั้น ${product.floor}` : '', product.location || ''].filter(Boolean).join(' · ');
+            return `<button onclick="selectAnalyticsProduct(${productNameJsArg(product.name)})" class="w-full text-left bg-white rounded-2xl border border-slate-100 shadow-sm p-4 hover:border-brand-blue/30 hover:shadow-md transition-all">
+                <div class="flex items-start gap-3">
+                    <div class="flex-1 min-w-0">
+                        <h4 class="text-sm font-black text-brand-blue leading-snug">${esc(product.name)}</h4>
+                        <p class="text-[10px] text-slate-400 mt-1">${esc(location || 'ยังไม่ระบุตำแหน่ง')} · Par ${Number(product.parLevel || 0).toLocaleString()} ${esc(product.unit || 'หน่วย')}</p>
+                    </div>
+                    <span class="text-[9px] font-bold px-2 py-1 rounded-full border ${status.cls}">${esc(status.label)}</span>
+                </div>
+                ${product.nameVariants && product.nameVariants.length ? `<div class="mt-2 text-[10px] text-violet-700 bg-violet-50 rounded-lg px-2 py-1">ชื่อใกล้เคียงในข้อมูล: ${product.nameVariants.map(esc).join(', ')}</div>` : ''}
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+                    <div class="bg-blue-50 rounded-xl p-2"><p class="text-[9px] text-blue-500">ขอเบิก</p><p class="text-sm font-black text-blue-800">${product.requestedRounds} รอบ · ${product.requestedQty.toLocaleString()}</p></div>
+                    <div class="bg-emerald-50 rounded-xl p-2"><p class="text-[9px] text-emerald-600">จัดส่งจริง</p><p class="text-sm font-black text-emerald-800">${product.fulfilledRounds} รอบ · ${product.fulfilledQty.toLocaleString()}</p></div>
+                    <div class="bg-slate-50 rounded-xl p-2"><p class="text-[9px] text-slate-500">เฉลี่ย / มัธยฐาน / สูงสุด</p><p class="text-xs font-black text-slate-700">${movementMetric(product.averageFulfilledQty)} / ${movementMetric(product.medianFulfilledQty)} / ${movementMetric(product.maxFulfilledQty)}</p></div>
+                    <div class="bg-slate-50 rounded-xl p-2"><p class="text-[9px] text-slate-500">แนวโน้มปริมาณ</p><p class="text-xs mt-0.5">${movementTrendLabel(product.qtyTrendPct)}</p></div>
+                </div>
+                <div class="flex flex-wrap gap-1.5 mt-3 text-[10px]">
+                    <span class="px-2 py-1 bg-slate-100 text-slate-600 rounded-lg">Fulfillment ${movementMetric(product.fulfillmentRate, '%')}</span>
+                    <span class="px-2 py-1 bg-slate-100 text-slate-600 rounded-lg">Lead time ${movementMetric(product.medianLeadTimeHours, ' ชม.')}</span>
+                    <span class="px-2 py-1 bg-slate-100 text-slate-600 rounded-lg">ล่าสุด ${movementDateLabel(product.latestMovementAt)}</span>
+                    ${attention.map(label => `<span class="px-2 py-1 bg-amber-50 text-amber-700 rounded-lg font-bold">${label}</span>`).join('')}
+                </div>
+            </button>`;
+        }
+
+        function movementPeriodComparisonTitle(period) {
+            if (period === 'week') return 'เทียบสัปดาห์ต่อสัปดาห์';
+            return `เทียบ ${productMovementPeriodLabel(period)} กับช่วงก่อนหน้า`;
+        }
+
+        function renderMovementTimeComparison(title, subtitle, icon, buckets) {
+            const allActive = (buckets || []).filter(bucket => Number(bucket.currentRounds || 0) > 0 || Number(bucket.priorRounds || 0) > 0);
+            const topCurrent = allActive.slice().sort((a, b) => Number(b.currentRounds || 0) - Number(a.currentRounds || 0) || Number(b.currentQty || 0) - Number(a.currentQty || 0)).slice(0, 3);
+            const topPrior = allActive.slice().sort((a, b) => Number(b.priorRounds || 0) - Number(a.priorRounds || 0) || Number(b.priorQty || 0) - Number(a.priorQty || 0)).slice(0, 3);
+            const maxCurrentRounds = Math.max(0, ...allActive.map(bucket => Number(bucket.currentRounds || 0)));
+            const maxPriorRounds = Math.max(0, ...allActive.map(bucket => Number(bucket.priorRounds || 0)));
+            const tiedPeaks = allActive.filter(bucket =>
+                (maxCurrentRounds > 0 && Number(bucket.currentRounds || 0) === maxCurrentRounds) ||
+                (maxPriorRounds > 0 && Number(bucket.priorRounds || 0) === maxPriorRounds)
+            );
+            const selectedHours = new Set([...topCurrent, ...topPrior, ...tiedPeaks].map(bucket => bucket.startHour));
+            const active = allActive.filter(bucket => selectedHours.has(bucket.startHour)).sort((a, b) => a.startHour - b.startHour);
+            const maxRounds = Math.max(1, maxCurrentRounds, maxPriorRounds);
+            return `<section class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+                <div class="flex items-start gap-3">
+                    <span class="material-icons-round text-brand-orange bg-orange-50 rounded-xl p-2">${icon}</span>
+                    <div><h3 class="text-sm font-black text-brand-blue">${title}</h3><p class="text-[10px] text-slate-500 mt-0.5">${subtitle} · แสดง Top 3 ของแต่ละช่วง</p></div>
+                </div>
+                ${active.length === 0 ? '<p class="text-xs text-slate-400 py-8 text-center">ยังไม่มีข้อมูลเวลาในช่วงนี้</p>' : `<div class="mt-4 space-y-3">${active.map((bucket, index) => {
+                    const currentWidth = Math.round((Number(bucket.currentRounds || 0) / maxRounds) * 100);
+                    const priorWidth = Math.round((Number(bucket.priorRounds || 0) / maxRounds) * 100);
+                    const isCurrentPeak = maxCurrentRounds > 0 && Number(bucket.currentRounds || 0) === maxCurrentRounds;
+                    const isPriorPeak = maxPriorRounds > 0 && Number(bucket.priorRounds || 0) === maxPriorRounds;
+                    return `<div class="rounded-xl ${isCurrentPeak ? 'bg-blue-50/70 border border-blue-100' : 'bg-slate-50'} p-3">
+                        <div class="flex flex-wrap items-center justify-between gap-2"><span class="text-xs font-black ${isCurrentPeak ? 'text-brand-blue' : 'text-slate-700'}">${esc(bucket.label)}</span><span class="flex flex-wrap gap-1">${isCurrentPeak ? '<span class="text-[9px] font-bold text-brand-orange bg-orange-100 rounded-full px-2 py-0.5">ปัจจุบันบ่อยสุด</span>' : ''}${isPriorPeak ? '<span class="text-[9px] font-bold text-slate-600 bg-slate-200 rounded-full px-2 py-0.5">ก่อนหน้าบ่อยสุด</span>' : ''}</span></div>
+                        <div class="mt-2 grid grid-cols-[5rem_1fr_auto] items-center gap-2 text-[10px]"><span class="font-bold text-brand-blue">ช่วงปัจจุบัน</span><span class="h-2 rounded-full bg-blue-100 overflow-hidden"><span class="block h-full rounded-full bg-brand-blue" style="width:${currentWidth}%"></span></span><span class="font-black text-brand-blue whitespace-nowrap">${Number(bucket.currentRounds || 0).toLocaleString()} รายการ · ${Number(bucket.currentQty || 0).toLocaleString()}</span></div>
+                        <div class="mt-1.5 grid grid-cols-[5rem_1fr_auto] items-center gap-2 text-[10px]"><span class="font-bold text-slate-500">ช่วงก่อนหน้า</span><span class="h-2 rounded-full bg-slate-200 overflow-hidden"><span class="block h-full rounded-full bg-slate-400" style="width:${priorWidth}%"></span></span><span class="font-black text-slate-500 whitespace-nowrap">${Number(bucket.priorRounds || 0).toLocaleString()} รายการ · ${Number(bucket.priorQty || 0).toLocaleString()}</span></div>
+                    </div>`;
+                }).join('')}</div>`}
+            </section>`;
+        }
+
+        function renderMovementPeriodComparison(data) {
+            const summary = data.summary || {};
+            const timeOfDay = data.timeOfDay || {};
+            const isWeek = data.period && data.period.key === 'week';
+            const currentLabel = isWeek ? 'สัปดาห์นี้' : productMovementPeriodLabel(data.period && data.period.key);
+            const priorLabel = isWeek ? 'สัปดาห์ก่อน' : 'ช่วงก่อนหน้า';
+            const comparisonSubtitle = isWeek
+                ? 'จันทร์ถึงเวลาปัจจุบัน เทียบกับช่วงเวลาเดียวกันของสัปดาห์ก่อน'
+                : `${currentLabel} เทียบกับช่วงก่อนหน้าที่มีระยะเวลาเท่ากัน`;
+            return `<section class="bg-gradient-to-br from-brand-blue to-blue-800 text-white rounded-2xl shadow-sm p-4">
+                <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                    <div><h3 class="text-base font-black">${movementPeriodComparisonTitle(data.period && data.period.key)}</h3><p class="text-[10px] text-white/70 mt-1">${comparisonSubtitle}</p></div>
+                    <div class="text-[10px] text-white/70 sm:text-right"><p>${movementDateLabel(data.period && data.period.start, true)} – ${movementDateLabel(data.period && data.period.end, true)}</p><p>เทียบ ${movementDateLabel(data.period && data.period.priorStart, true)} – ${movementDateLabel(data.period && data.period.priorEnd, true)}</p></div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                    <div class="bg-white/10 border border-white/15 rounded-2xl p-4"><p class="text-[10px] font-bold text-white/70">ยอดเบิกรวม</p><div class="flex items-end justify-between gap-3 mt-1"><div><p class="text-2xl font-black">${Number(summary.requestedQty || 0).toLocaleString()}</p><p class="text-[10px] text-white/70">${currentLabel}</p></div><div class="text-right"><p class="text-sm font-black">${Number(summary.priorRequestedQty || 0).toLocaleString()}</p><p class="text-[10px] text-white/60">${priorLabel}</p></div></div><div class="mt-2 text-xs">${movementTrendLabel(summary.requestedQtyTrendPct)}</div></div>
+                    <div class="bg-white/10 border border-white/15 rounded-2xl p-4"><p class="text-[10px] font-bold text-white/70">จำนวนรายการเบิก <span class="font-normal">(ใช้แทนจำนวนบิล)</span></p><div class="flex items-end justify-between gap-3 mt-1"><div><p class="text-2xl font-black">${Number(summary.requestedRounds || 0).toLocaleString()} <span class="text-xs">รายการ</span></p><p class="text-[10px] text-white/70">${currentLabel}</p></div><div class="text-right"><p class="text-sm font-black">${Number(summary.priorRequestedRounds || 0).toLocaleString()} รายการ</p><p class="text-[10px] text-white/60">${priorLabel}</p></div></div><div class="mt-2 text-xs">${movementTrendLabel(summary.requestedRoundsTrendPct)}</div></div>
+                </div>
+            </section>
+            <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                ${renderMovementTimeComparison('ช่วงเวลาที่เบิกบ่อย', 'นับจากเวลาสร้างคำขอ · เวลาไทย · ตัวเลขหลังจำนวนรายการคือปริมาณรวม', 'shopping_cart', timeOfDay.requestBuckets)}
+                ${renderMovementTimeComparison('ช่วงเวลาที่จัดสินค้าบ่อย', 'อิงเวลาบันทึกจัดส่งจริงเป็นตัวแทน เนื่องจากระบบยังไม่มีเวลาเริ่มหยิบสินค้า', 'schedule', timeOfDay.dispatchBuckets)}
+            </section>`;
+        }
+
+        function renderProductMovementOverview() {
+            const data = state.productMovementReport;
+            const summary = data.summary || {};
+            const filtered = getFilteredProductMovements();
+            const visible = filtered.slice(0, state.productMovementLimit);
+            const available = data.products.filter(product => state.productMovementIncludeNostk || !product.isNostk);
+            const floors = [...new Set(available.map(product => product.floor).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+            const locations = [...new Set(available.filter(product => !state.productMovementFloor || product.floor === state.productMovementFloor).map(product => product.location).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+            const leaders = filtered.filter(product => product.fulfilledRounds > 0);
+            const frequent = leaders.slice().sort((a, b) => b.fulfilledRounds - a.fulfilledRounds || b.fulfilledQty - a.fulfilledQty).slice(0, 10);
+            const volume = leaders.slice().sort((a, b) => b.fulfilledQty - a.fulfilledQty || b.fulfilledRounds - a.fulfilledRounds).slice(0, 10);
+            const periods = ['week', '7', '30', '60', '90'];
+            const kpis = [
+                ['สินค้าทั้งหมด', summary.masterProductCount, 'inventory_2', 'text-brand-blue bg-blue-50'],
+                ['เคลื่อนไหวในช่วง', summary.movedProductCount, 'local_shipping', 'text-emerald-700 bg-emerald-50'],
+                ['รอบจัดส่งจริง', summary.fulfilledRounds, 'repeat', 'text-indigo-700 bg-indigo-50'],
+                ['ปริมาณจัดส่งจริง', summary.fulfilledQty, 'scale', 'text-brand-orange bg-orange-50'],
+                ['ไม่เคลื่อนไหว 30+ วัน', summary.inactive30, 'schedule', 'text-amber-700 bg-amber-50'],
+                ['ไม่เคลื่อนไหว 60+ วัน', summary.inactive60, 'hourglass_bottom', 'text-orange-700 bg-orange-50'],
+                ['ไม่เคลื่อนไหว 90+ วัน', summary.inactive90, 'warning_amber', 'text-rose-700 bg-rose-50'],
+                ['ไม่พบประวัติเคลื่อนไหว', summary.neverMoved, 'history_toggle_off', 'text-slate-700 bg-slate-100']
+            ];
+
+            return `
+                ${state.productMovementLoading ? '<div role="status" aria-live="polite" class="bg-blue-50 border border-blue-100 text-blue-700 rounded-xl px-3 py-2 text-xs font-bold">กำลังรีเฟรชรายงาน...</div>' : ''}
+                ${state.productMovementError ? `<div role="status" aria-live="polite" class="bg-amber-50 border border-amber-200 text-amber-700 rounded-xl px-3 py-2 text-xs font-bold">${esc(state.productMovementError)} — ยังแสดงข้อมูลเดิมอยู่</div>` : ''}
+                <section class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div><h2 class="text-lg font-black text-brand-blue">รายงานการเคลื่อนไหวสินค้า</h2><p class="text-xs text-slate-500 mt-1">นับการจัดส่งจริง แยกจากคำขอเบิก รายการค้าง สินค้าหมด และยกเลิก</p></div>
+                        <div class="flex flex-wrap gap-1.5">${periods.map(period => `<button onclick="setProductMovementPeriod('${period}')" aria-pressed="${state.productMovementPeriod === period}" class="min-h-11 px-3 rounded-xl text-xs font-bold ${state.productMovementPeriod === period ? 'bg-brand-blue text-white' : 'bg-slate-100 text-slate-600'}">${productMovementPeriodLabel(period)}</button>`).join('')}</div>
+                    </div>
+                    <div class="mt-3 flex flex-wrap gap-2 text-[10px] text-slate-500">
+                        <span>สร้างเมื่อ ${movementDateLabel(data.generatedAt, true)}</span>
+                        <span>· เทียบช่วงก่อนหน้าระยะเท่ากัน</span>
+                        ${data.cached ? `<span class="font-bold text-amber-600">· ข้อมูลแคชไม่เกิน ${data.maxStaleSeconds || 120} วินาที</span>` : '<span class="font-bold text-emerald-600">· ข้อมูลคำนวณใหม่</span>'}
+                        ${data.diagnostics && data.diagnostics.legacyDateFallbacks ? `<span class="font-bold text-violet-600">· ${data.diagnostics.legacyDateFallbacks} รอบใช้วันที่ขอเบิกแทนวันที่จัดส่งเดิม</span>` : ''}
+                    </div>
+                </section>
+
+                ${renderMovementPeriodComparison(data)}
+
+                <section class="grid grid-cols-2 lg:grid-cols-4 gap-3">${kpis.map(([label, value, icon, cls]) => `<div class="rounded-2xl p-3 ${cls}"><span class="material-icons-round text-[19px]">${icon}</span><p class="text-[10px] font-bold opacity-75 mt-1">${label}</p><p class="text-xl font-black mt-0.5">${Number(value || 0).toLocaleString()}</p></div>`).join('')}</section>
+
+                <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    ${renderMovementLeaderboard('เคลื่อนไหวบ่อย', 'repeat', frequent, 'fulfilledRounds', 'รอบ')}
+                    ${renderMovementLeaderboard('ปริมาณเคลื่อนไหวสูง', 'scale', volume, 'fulfilledQty', '')}
+                </section>
+
+                <section class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-3">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+                        <label class="lg:col-span-2"><span class="block text-[10px] font-bold text-slate-500 mb-1">ค้นหาสินค้า</span><input value="${esc(state.productMovementSearch)}" oninput="updateProductSearch(this.value)" placeholder="ชื่อสินค้า ชั้น หรือ Location" class="w-full h-12 px-3 rounded-xl bg-slate-50 border border-slate-200 text-base"></label>
+                        <label><span class="block text-[10px] font-bold text-slate-500 mb-1">ชั้น</span><select onchange="setProductMovementFilter('floor', this.value)" class="w-full h-12 px-3 rounded-xl bg-slate-50 border border-slate-200 text-base"><option value="">ทุกชั้น</option>${floors.map(value => `<option value="${esc(value)}" ${value === state.productMovementFloor ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select></label>
+                        <label><span class="block text-[10px] font-bold text-slate-500 mb-1">Zone / Location</span><select onchange="setProductMovementFilter('location', this.value)" class="w-full h-12 px-3 rounded-xl bg-slate-50 border border-slate-200 text-base"><option value="">ทุกตำแหน่ง</option>${locations.map(value => `<option value="${esc(value)}" ${value === state.productMovementLocation ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select></label>
+                        <label><span class="block text-[10px] font-bold text-slate-500 mb-1">สถานะ</span><select onchange="setProductMovementFilter('state', this.value)" class="w-full h-12 px-3 rounded-xl bg-slate-50 border border-slate-200 text-base">
+                            ${[['all','ทั้งหมด'],['active','เคลื่อนไหวในช่วง'],['inactive30','ไม่เคลื่อนไหว 30+ วัน'],['inactive60','ไม่เคลื่อนไหว 60+ วัน'],['inactive90','ไม่เคลื่อนไหว 90+ วัน'],['never','ไม่พบประวัติ'],['attention','ต้องตรวจสอบ'],['historyOnly','มีเฉพาะในประวัติ']].map(([value,label]) => `<option value="${value}" ${value === state.productMovementState ? 'selected' : ''}>${label}</option>`).join('')}
+                        </select></label>
+                    </div>
+                    <div class="flex flex-wrap items-end justify-between gap-2">
+                        <button onclick="toggleProductMovementNostk()" role="switch" aria-checked="${state.productMovementIncludeNostk}" class="min-h-11 px-3 rounded-xl border text-xs font-bold ${state.productMovementIncludeNostk ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-200'}">${state.productMovementIncludeNostk ? '✓' : ''} รวม NOSTK</button>
+                        <label><span class="text-[10px] font-bold text-slate-500 mr-2">เรียงตาม</span><select onchange="setProductMovementFilter('sort', this.value)" class="h-11 px-3 rounded-xl bg-slate-50 border border-slate-200 text-sm"><option value="frequency" ${state.productMovementSort === 'frequency' ? 'selected' : ''}>ความถี่</option><option value="quantity" ${state.productMovementSort === 'quantity' ? 'selected' : ''}>ปริมาณ</option><option value="inactive" ${state.productMovementSort === 'inactive' ? 'selected' : ''}>วันไม่เคลื่อนไหว</option><option value="name" ${state.productMovementSort === 'name' ? 'selected' : ''}>ชื่อสินค้า</option></select></label>
+                    </div>
+                </section>
+
+                <section>
+                    <div class="flex items-center justify-between mb-3"><h3 class="text-sm font-black text-brand-blue">รายละเอียดสินค้า</h3><span class="text-xs text-slate-400">พบ ${filtered.length.toLocaleString()} รายการ</span></div>
+                    ${visible.length ? `<div class="grid grid-cols-1 xl:grid-cols-2 gap-3">${visible.map(renderProductMovementCard).join('')}</div>` : renderEmptyState('ไม่พบสินค้าตามตัวกรอง', 'search_off')}
+                    ${visible.length < filtered.length ? `<div class="text-center mt-4"><button onclick="loadMoreProductMovements()" class="min-h-12 px-5 rounded-xl bg-white border border-slate-200 text-sm font-bold text-brand-blue">แสดงเพิ่มอีก ${Math.min(50, filtered.length - visible.length)} รายการ</button></div>` : ''}
+                </section>`;
+        }
+
+        function renderProductMovementDetail() {
+            const data = state.productMovementReport;
+            const product = (data.products || []).find(row => row.name === state.productSelected);
+            if (!product) return `${renderEmptyState('ไม่พบข้อมูลสินค้าที่เลือก', 'inventory_2')}<div class="text-center"><button onclick="clearAnalyticsProduct()" class="h-12 px-4 text-brand-blue font-bold">กลับไปรายงาน</button></div>`;
+            const status = movementStateMeta(product);
+            const detail = state.productMovementDetail;
+            const windows = detail && detail.windows ? detail.windows : {};
+            const renderWindow = (days) => {
+                const windowData = windows[String(days)];
+                if (!windowData) return `<div class="bg-slate-50 rounded-2xl p-4 text-xs text-slate-400">กำลังโหลดข้อมูล ${days} วัน...</div>`;
+                return `<div class="bg-white rounded-2xl border border-slate-100 p-4"><div class="flex justify-between"><h3 class="text-sm font-black text-brand-blue">${days} วันล่าสุด</h3><span class="text-[10px] text-slate-400">${windowData.fulfilledRounds} รอบ</span></div><div class="grid grid-cols-2 gap-3 mt-3"><div><p class="text-[10px] text-slate-400">ขอเบิก</p><p class="text-lg font-black text-slate-700">${windowData.requestedQty.toLocaleString()}</p><p class="text-[10px]">${productTrendBadge(windowData.requestedQty, windowData.priorRequestedQty)}</p></div><div><p class="text-[10px] text-slate-400">จัดส่งจริง</p><p class="text-lg font-black text-brand-orange">${windowData.fulfilledQty.toLocaleString()}</p><p class="text-[10px]">${productTrendBadge(windowData.fulfilledQty, windowData.priorFulfilledQty)}</p></div></div></div>`;
+            };
+            return `
+                <button onclick="clearAnalyticsProduct()" class="min-h-11 text-xs font-bold text-brand-blue inline-flex items-center gap-1"><span class="material-icons-round text-[17px]">arrow_back</span>กลับไปรายงาน</button>
+                <section class="bg-brand-blue text-white rounded-2xl p-5 relative overflow-hidden"><span class="material-icons-round absolute -right-4 -bottom-4 text-[90px] opacity-10">inventory_2</span><h2 class="text-xl font-black pr-10">${esc(product.name)}</h2><p class="text-xs text-white/75 mt-2">${esc(product.isNostk ? 'NOSTK' : [product.floor ? `ชั้น ${product.floor}` : '', product.location || ''].filter(Boolean).join(' · ') || 'ยังไม่ระบุตำแหน่ง')} · Par ${product.parLevel || 0} ${esc(product.unit || 'หน่วย')}</p><span class="inline-block mt-3 text-[10px] font-bold px-2 py-1 rounded-full bg-white/15 border border-white/20">${esc(status.label)}</span></section>
+                <section class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div class="bg-blue-50 rounded-2xl p-3"><p class="text-[10px] text-blue-600">ขอเบิก ${productMovementPeriodLabel(state.productMovementPeriod)}</p><p class="text-xl font-black text-blue-800">${product.requestedRounds} รอบ</p><p class="text-xs text-blue-600">${product.requestedQty.toLocaleString()} ${esc(product.unit)}</p></div>
+                    <div class="bg-emerald-50 rounded-2xl p-3"><p class="text-[10px] text-emerald-600">จัดส่งจริง</p><p class="text-xl font-black text-emerald-800">${product.fulfilledRounds} รอบ</p><p class="text-xs text-emerald-600">${product.fulfilledQty.toLocaleString()} ${esc(product.unit)}</p></div>
+                    <div class="bg-orange-50 rounded-2xl p-3"><p class="text-[10px] text-orange-600">แนวโน้มปริมาณ</p><p class="text-lg mt-1">${movementTrendLabel(product.qtyTrendPct)}</p><p class="text-[10px] text-orange-500">ช่วงก่อน ${product.priorFulfilledQty.toLocaleString()}</p></div>
+                    <div class="bg-slate-100 rounded-2xl p-3"><p class="text-[10px] text-slate-500">Fulfillment / Lead time</p><p class="text-lg font-black text-slate-700">${movementMetric(product.fulfillmentRate, '%')}</p><p class="text-[10px] text-slate-500">${movementMetric(product.medianLeadTimeHours, ' ชม.')}</p></div>
+                </section>
+                <section class="grid grid-cols-1 sm:grid-cols-2 gap-3">${renderWindow(3)}${renderWindow(7)}</section>
+                <section class="bg-white rounded-2xl border border-slate-100 p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                    <div><p class="text-[10px] text-slate-400">เฉลี่ย / รอบ</p><p class="text-sm font-black">${movementMetric(product.averageFulfilledQty)}</p></div><div><p class="text-[10px] text-slate-400">มัธยฐาน / สูงสุด</p><p class="text-sm font-black">${movementMetric(product.medianFulfilledQty)} / ${movementMetric(product.maxFulfilledQty)}</p></div><div><p class="text-[10px] text-slate-400">ค้าง / ส่งไม่ครบ / หมด / ยกเลิก</p><p class="text-sm font-black">${product.pendingRounds} / ${product.partialCount} / ${product.stockoutCount} / ${product.cancelledCount || 0}</p></div><div><p class="text-[10px] text-slate-400">ขาดจากส่งไม่ครบ</p><p class="text-sm font-black">${product.shortageQty.toLocaleString()} ${esc(product.unit)}</p></div>
+                </section>
+                ${product.nameVariants && product.nameVariants.length ? `<div class="bg-violet-50 border border-violet-200 text-violet-700 rounded-xl p-3 text-xs"><b>คำเตือนคุณภาพข้อมูล:</b> พบชื่อใกล้เคียง ${product.nameVariants.map(esc).join(', ')} ระบบยังไม่รวมชื่อให้อัตโนมัติ</div>` : ''}
+                <section><div class="flex items-center justify-between mb-3"><h3 class="text-sm font-black text-brand-blue">ประวัติรายรอบล่าสุด</h3>${detail ? `<span class="text-[10px] text-slate-400">แสดง ${detail.records.length} จาก ${detail.totalCount} รายการ</span>` : ''}</div>
+                    ${state.productMovementDetailLoading ? '<div class="py-10 text-center text-sm text-slate-400">กำลังโหลดประวัติ...</div>' : state.productMovementDetailError ? `<div class="bg-rose-50 rounded-xl p-3 text-xs text-rose-700">${esc(state.productMovementDetailError)} <button onclick="fetchProductMovementDetail(state.productSelected)" class="underline font-bold">ลองใหม่</button></div>` : detail && detail.records.length ? `<div class="bg-white rounded-2xl border border-slate-100 divide-y divide-slate-100">${detail.records.map(record => `<div class="p-4"><div class="flex justify-between gap-2"><span class="text-[10px] font-mono text-brand-blue">${esc(record.id || '-')}</span>${getStatusBadge(record.status)}</div><div class="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-2 text-[10px] text-slate-500"><span>ขอเบิก: ${movementDateLabel(record.requestAt, true)}</span><span>${record.dispatchAt ? `จัดส่ง: ${movementDateLabel(record.dispatchAt, true)}${record.legacyDateFallback ? ' (ใช้วันที่ขอเบิกเดิม)' : ''}` : record.exceptionAt ? `เหตุการณ์: ${movementDateLabel(record.exceptionAt, true)}` : 'จัดส่ง: -'}</span><span>ผู้ขอ: ${esc(record.requestedBy || '-')}</span><span>ขอ ${record.requestQty.toLocaleString()} · ส่งจริง ${record.actualQty.toLocaleString()} · ขาด ${record.shortageQty.toLocaleString()} ${esc(product.unit)}</span></div></div>`).join('')}</div>` : renderEmptyState('ไม่มีประวัติของสินค้านี้', 'inventory_2')}
+                </section>`;
+        }
+
         // trend badge เทียบช่วงปัจจุบันกับช่วงก่อนหน้าที่เท่ากัน
         function productTrendBadge(cur, prev) {
             if (prev === 0 && cur === 0) return `<span class="text-[10px] text-slate-400">—</span>`;
@@ -3122,7 +3525,7 @@
             return `<span class="text-[10px] font-bold ${up ? 'text-emerald-600' : 'text-rose-600'} inline-flex items-center"><span class="material-icons-round text-[12px]">${up ? 'arrow_upward' : 'arrow_downward'}</span>${Math.abs(pct)}%</span>`;
         }
 
-        function renderProductDetail(a) {
+        function renderLegacyProductDetail(a) {
             const fmtDate = d => d ? `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear() + 543}` : '-';
             const unit = a.unit || 'หน่วย';
 
