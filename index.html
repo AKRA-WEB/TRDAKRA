@@ -193,6 +193,22 @@
         }
 
         // ฟังก์ชัน verify token + init app — เรียกใน window.onload
+        
+    function decodeJwtPayload(token) {
+        try {
+            if (!token || typeof token !== 'string') return null;
+            const parts = token.split('.');
+            if (parts.length !== 3) return null;
+            const payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+            const json = typeof Buffer !== 'undefined'
+                ? Buffer.from(payloadBase64, 'base64').toString('utf8')
+                : decodeURIComponent(escape(atob(payloadBase64)));
+            const parsed = JSON.parse(json);
+            if (parsed && parsed.exp && parsed.exp * 1000 < Date.now()) return null;
+            return parsed;
+        } catch (e) { return null; }
+    }
+
         async function ssoInit() {
             // ── DEV BYPASS: เฉพาะ localhost เท่านั้น (?demo=1 ใช้ได้เฉพาะบน localhost เพื่อกัน bypass บน production) ──
             const isLocalhost = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
@@ -206,6 +222,30 @@
             // ────────────────────────────────────────────────────
             const urlParams = new URLSearchParams(window.location.search);
             const ssoToken  = urlParams.get('sso');
+            const cachedRaw = localStorage.getItem(SSO_CONFIG.STORAGE_KEY);
+            let cachedSession = null;
+            try { if (cachedRaw) cachedSession = JSON.parse(cachedRaw); } catch(e) {}
+            const tokenToVerify = ssoToken || (cachedSession && cachedSession.token);
+
+            if (tokenToVerify) {
+                const jwtUser = decodeJwtPayload(tokenToVerify);
+                if (jwtUser) {
+                    const roles = jwtUser.roles || [];
+                    const hasAccess = roles.includes('ADMIN') || roles.some(r => SSO_CONFIG.REQUIRED_ROLES.includes(r));
+                    if (hasAccess) {
+                        localStorage.setItem(SSO_CONFIG.STORAGE_KEY, JSON.stringify({
+                            name: jwtUser.name || jwtUser.id,
+                            id: jwtUser.id,
+                            roles: roles,
+                            token: tokenToVerify
+                        }));
+                        currentUser = jwtUser.name || jwtUser.id;
+                        sessionToken = tokenToVerify;
+                        if (ssoToken) { try { window.history.replaceState({}, document.title, window.location.pathname); } catch(e) {} }
+                        return;
+                    }
+                }
+            }
 
             if (ssoToken) {
                 // ===== มี Token จาก Main Menu — verify กับ Server =====
