@@ -211,12 +211,13 @@ const surveyRow = (date, floor, product, need = 0, user = 'Tester') =>
     assert.strictEqual(runtime.properties.SURVEY_LOG_MONTHLY_ENABLED, '1');
 
     assert.strictEqual(runtime.api.saveSurveyLog('Tester', '3', [{ name: 'E', currentStock: 1, parLevel: 2 }]), true);
-    const july = runtime.spreadsheet.getSheetByName('SurveyLog_2026_07');
-    const rowsAfterSave = july.getLastRow();
+    const currentMonthKey = runtime.api.getSurveyMonthKey_(new Date());
+    const currentSheet = runtime.spreadsheet.getSheetByName('SurveyLog_' + currentMonthKey);
+    const rowsAfterSave = currentSheet.getLastRow();
     const second = runtime.api.migrateSurveyLogToMonthlySheets();
     assert.strictEqual(second.prefixMatches, true);
-    assert.strictEqual(july.getLastRow(), rowsAfterSave, 'migration rerun must not duplicate legacy rows');
-    assert.strictEqual(runtime.api.getSurveyLogCurrentSheet_(runtime.spreadsheet).getName(), 'SurveyLog_2026_07');
+    assert.strictEqual(currentSheet.getLastRow(), rowsAfterSave, 'migration rerun must not duplicate legacy rows');
+    assert.strictEqual(runtime.api.getSurveyLogCurrentSheet_(runtime.spreadsheet).getName(), 'SurveyLog_' + currentMonthKey);
     const staleResponse = runtime.api.getSurveyLog();
     assert.strictEqual(staleResponse.length, 5, 'stale response must include post-cutover monthly writes');
     assert.strictEqual(staleResponse[0].productName, 'E');
@@ -265,16 +266,17 @@ const surveyRow = (date, floor, product, need = 0, user = 'Tester') =>
 {
     const runtime = createRuntime(
         [
-            new MockSheet('SurveyLog', [header]),
-            new MockSheet('SurveyLog_2026_07', [header, surveyRow('01-07-2026 / 10:00 น.', '1', 'A')])
+            new MockSheet('SurveyLog', [header])
         ],
         { SURVEY_LOG_MONTHLY_ENABLED: '1' }
     );
-    runtime.api.getSurveyLogMonthly('2026_07');
-    assert.ok(runtime.cacheValues['surveyLogMonthly:v1:2026_07']);
+    const currentMonthKey = runtime.api.getSurveyMonthKey_(new Date());
+    runtime.spreadsheet.sheets['SurveyLog_' + currentMonthKey] = new MockSheet('SurveyLog_' + currentMonthKey, [header, surveyRow('01-07-2026 / 10:00 น.', '1', 'A')]);
+    runtime.api.getSurveyLogMonthly(currentMonthKey);
+    assert.ok(runtime.cacheValues['surveyLogMonthly:v1:' + currentMonthKey]);
     assert.strictEqual(runtime.api.saveSurveyLog('Tester', '1', [{ name: 'B', currentStock: 1, parLevel: 2 }]), true);
-    assert.strictEqual(runtime.cacheValues['surveyLogMonthly:v1:2026_07'], undefined);
-    assert.ok(runtime.cacheEvents.includes('remove:surveyLogMonthly:v1:2026_07'));
+    assert.strictEqual(runtime.cacheValues['surveyLogMonthly:v1:' + currentMonthKey], undefined);
+    assert.ok(runtime.cacheEvents.includes('remove:surveyLogMonthly:v1:' + currentMonthKey));
 }
 
 {

@@ -153,7 +153,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260819.10";
+        const CURRENT_VERSION = "20260820.01";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -200,7 +200,10 @@
             if (!token || typeof token !== 'string') return null;
             const parts = token.split('.');
             if (parts.length !== 3) return null;
-            const payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+            let payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+            while (payloadBase64.length % 4) {
+                payloadBase64 += '=';
+            }
             const json = typeof Buffer !== 'undefined'
                 ? Buffer.from(payloadBase64, 'base64').toString('utf8')
                 : decodeURIComponent(escape(atob(payloadBase64)));
@@ -232,7 +235,7 @@
                 const jwtUser = decodeJwtPayload(tokenToVerify);
                 if (jwtUser) {
                     const roles = jwtUser.roles || [];
-                    const hasAccess = roles.includes('ADMIN') || roles.some(r => SSO_CONFIG.REQUIRED_ROLES.includes(r));
+                    const hasAccess = SSO_CONFIG.REQUIRED_ROLES.length === 0 || roles.includes('ADMIN') || roles.some(r => SSO_CONFIG.REQUIRED_ROLES.includes(r));
                     if (hasAccess) {
                         localStorage.setItem(SSO_CONFIG.STORAGE_KEY, JSON.stringify({
                             name: jwtUser.name || jwtUser.id,
@@ -243,6 +246,8 @@
                         currentUser = jwtUser.name || jwtUser.id;
                         sessionToken = tokenToVerify;
                         if (ssoToken) { try { window.history.replaceState({}, document.title, window.location.pathname); } catch(e) {} }
+                        showLoading('กำลังโหลดข้อมูลเบิกจ่าย...');
+                        fetchInitialData();
                         return;
                     }
                 }
