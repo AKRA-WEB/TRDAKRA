@@ -153,7 +153,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260820.01";
+        const CURRENT_VERSION = "20260820.02";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SSO_CONFIG = {
@@ -1365,6 +1365,38 @@
         }
 
         async function fetchInitialData(isRefresh = false, skipHideLoading = false) {
+            if (typeof window !== 'undefined' && window.AkraSupabaseTRD) {
+                try {
+                    const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhneHJyc2t6dGJwZWppcnJkcGJxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzEyNDU4MCwiZXhwIjoyMTAyNzAwNTgwfQ.9RiiP0kItbbcMeI2mYActrD9a1naHCNbmYJBRXHR1DI';
+                    const supaHeaders = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY };
+                    const [movements, products] = await Promise.all([
+                        fetch('https://hgxrrskztbpejirrdpbq.supabase.co/rest/v1/stock_movements?order=movement_date.desc&limit=200', { headers: supaHeaders }).then(r => r.json()),
+                        fetch('https://hgxrrskztbpejirrdpbq.supabase.co/rest/v1/products?order=name.asc&limit=2000', { headers: supaHeaders }).then(r => r.json())
+                    ]);
+                    if (Array.isArray(products) && products.length > 0) {
+                        state.products = products.map(p => ({ sku: p.sku, name: p.name, unit: p.unit || 'ชิ้น', floor: p.floor || '', location: p.location || '', parLevel: p.par_level || 0 }));
+                        if (Array.isArray(movements) && movements.length > 0) {
+                            state.items = movements.map(m => mapItemData({
+                                id: m.id,
+                                timestamp: m.movement_date,
+                                requestedBy: m.requester,
+                                item: m.product_name,
+                                quantity: m.qty,
+                                unit: m.unit,
+                                sourceWarehouse: m.source_warehouse,
+                                targetWarehouse: m.target_warehouse,
+                                status: m.status
+                            }));
+                        }
+                        setCache('TRDAKRA_DATA', { rawItems: state.items, products: state.products, windowDays: INVENTORY_WINDOW_DAYS });
+                        if (!skipHideLoading) hideLoading();
+                        render();
+                        return;
+                    }
+                } catch(supaErr) {
+                    console.warn('Supabase TRDAKRA initial data error, fallback to GAS:', supaErr);
+                }
+            }
             if (!APPS_SCRIPT_URL) { hideLoading(); alert('กรุณาใส่ APPS_SCRIPT_URL ก่อนใช้งาน'); return; }
 
             const startTotal = performance.now();
