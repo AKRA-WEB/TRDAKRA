@@ -151,7 +151,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260830.04";
+        const CURRENT_VERSION = "20260830.05";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -521,16 +521,32 @@
             return `${TRD_API_URL}?action=getItems${suffix}`;
         }
         function mapItemData(item) {
+            const rawTs = item.timestamp || item.date || item.rawDate || '';
+            const dispTs = item.dispatchTimestamp || item.dispatch_timestamp || '';
+            const recTs = item.recheckAt || item.recheck_at || '';
+            let parsedRawDate = item.rawDate ? new Date(item.rawDate) : parseCustomDate(rawTs);
+            if (isNaN(parsedRawDate.getTime())) parsedRawDate = parseCustomDate(rawTs);
+            const tsStr = String(rawTs).includes('/') ? rawTs : (rawTs ? formatDateTime(rawTs) : '-');
             return {
                 ...item,
-                rawDate: parseCustomDate(item.timestamp),
-                timestamp: String(item.timestamp).includes('/') ? item.timestamp : formatDateTime(item.timestamp),
-                dispatchTimestamp: item.dispatchTimestamp ? (String(item.dispatchTimestamp).includes('/') ? item.dispatchTimestamp : formatDateTime(item.dispatchTimestamp)) : '',
-                recheckAt: item.recheckAt ? (String(item.recheckAt).includes('/') ? item.recheckAt : formatDateTime(item.recheckAt)) : '',
-                requestedBy: item.requestedBy || '',
-                oldExpiry: formatExpiryDate(item.oldExpiry),
-                newExpiry: formatExpiryDate(item.newExpiry),
-                storageCapacity: parseInt(item.currentStock || item.storageCapacity) || 0
+                id: item.id || '',
+                itemName: item.itemName || item.item_name || item.name || '',
+                requestQty: parseInt(item.requestQty ?? item.request_qty) || 0,
+                storageCapacity: parseInt(item.storageCapacity ?? item.storage_capacity ?? item.currentStock) || 0,
+                status: item.status || 'สั่งเบิก',
+                rawDate: parsedRawDate,
+                timestamp: tsStr,
+                dispatchTimestamp: dispTs ? (String(dispTs).includes('/') ? dispTs : formatDateTime(dispTs)) : '',
+                recheckAt: recTs ? (String(recTs).includes('/') ? recTs : formatDateTime(recTs)) : '',
+                recheckBy: item.recheckBy || item.recheck_by || '',
+                recheckNote: item.recheckNote || item.recheck_note || '',
+                recheckQty: item.recheckQty ?? item.recheck_qty ?? null,
+                receiveQty: item.receiveQty ?? item.receive_qty ?? null,
+                receiveNote: item.receiveNote || item.receive_note || '',
+                w2Note: item.w2Note || item.w2_note || '',
+                requestedBy: item.requestedBy || item.requested_by || '',
+                oldExpiry: formatExpiryDate(item.oldExpiry || item.old_expiry),
+                newExpiry: formatExpiryDate(item.newExpiry || item.new_expiry)
             };
         }
 
