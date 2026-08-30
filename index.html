@@ -151,7 +151,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260830.05";
+        const CURRENT_VERSION = "20260830.06";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -3473,6 +3473,36 @@
             }
         }
 
+        function quickOrderFromAnalytics(productName, unit = 'ชิ้น') {
+            state.view = 'w1';
+            state.w1Tab = 'form';
+            const prod = (state.products || []).find(p => p.name === productName);
+            state.w1Rows = [{
+                itemName: productName,
+                qty: prod && prod.parLevel ? String(prod.parLevel) : '1',
+                storageCapacity: prod && prod.storageCapacity ? String(prod.storageCapacity) : '',
+                floor: prod ? prod.floor : '',
+                location: prod ? prod.location : '',
+                parLevel: prod ? String(prod.parLevel || '') : '',
+                oldExpiry: '',
+                unit: unit || (prod ? prod.unit : 'ชิ้น')
+            }];
+            render();
+        }
+
+        function quickEditLocationFromAnalytics(productName) {
+            const prod = (state.products || []).find(p => p.name === productName);
+            state.view = 'location';
+            state.locationSearch = productName;
+            state.locationFloorFilter = prod ? prod.floor || '' : '';
+            state.locationZoneFilter = '';
+            state.locationSheet = productName;
+            state.locationSheetFloor = prod ? prod.floor || '' : '';
+            state.locationSheetZoneInput = prod ? prod.location || '' : '';
+            state.locationSheetParLevel = prod ? String(prod.parLevel || '') : '';
+            render();
+        }
+
         function setProductMovementPeriod(period) {
             if (!['week', '7', '30', '60', '90'].includes(period) || period === state.productMovementPeriod) return;
             state.productMovementPeriod = period;
@@ -3702,10 +3732,11 @@
                     <div class="bg-slate-50 rounded-xl p-2"><p class="text-[9px] text-slate-500">เฉลี่ย / มัธยฐาน / สูงสุด</p><p class="text-xs font-black text-slate-700">${movementMetric(product.averageFulfilledQty)} / ${movementMetric(product.medianFulfilledQty)} / ${movementMetric(product.maxFulfilledQty)}</p></div>
                     <div class="bg-slate-50 rounded-xl p-2"><p class="text-[9px] text-slate-500">แนวโน้มปริมาณ</p><p class="text-xs mt-0.5">${movementTrendLabel(product.qtyTrendPct)}</p></div>
                 </div>
-                <div class="flex flex-wrap gap-1.5 mt-3 text-[10px]">
+                <div class="flex flex-wrap items-center gap-1.5 mt-3 text-[10px]">
                     <span class="px-2 py-1 bg-slate-100 text-slate-600 rounded-lg">Fulfillment ${movementMetric(product.fulfillmentRate, '%')}</span>
                     <span class="px-2 py-1 bg-slate-100 text-slate-600 rounded-lg">Lead time ${movementMetric(product.medianLeadTimeHours, ' ชม.')}</span>
                     <span class="px-2 py-1 bg-slate-100 text-slate-600 rounded-lg">ล่าสุด ${movementDateLabel(product.latestMovementAt)}</span>
+                    ${product.daysInactive >= 30 ? `<span class="px-2 py-1 bg-amber-100 text-amber-800 rounded-lg font-bold border border-amber-300 flex items-center gap-0.5"><span class="material-icons-round text-[12px] text-amber-700">warning_amber</span> หยุดนิ่ง ${product.daysInactive} วัน (ตรวจ EXP)</span>` : ''}
                     ${attention.map(label => `<span class="px-2 py-1 bg-amber-50 text-amber-700 rounded-lg font-bold">${label}</span>`).join('')}
                 </div>
             </button>`;
@@ -3788,15 +3819,17 @@
             const volume = leaders.slice().sort((a, b) => b.fulfilledQty - a.fulfilledQty || b.fulfilledRounds - a.fulfilledRounds).slice(0, 10);
             const rollingPeriods = ['7', '30', '60', '90'];
             const kpis = [
-                ['สินค้าทั้งหมด', summary.masterProductCount, 'inventory_2', 'text-brand-blue bg-blue-50'],
-                ['เคลื่อนไหวในช่วง', summary.movedProductCount, 'local_shipping', 'text-emerald-700 bg-emerald-50'],
-                ['รอบจัดส่งจริง', summary.fulfilledRounds, 'repeat', 'text-indigo-700 bg-indigo-50'],
-                ['ปริมาณจัดส่งจริง', summary.fulfilledQty, 'scale', 'text-brand-orange bg-orange-50'],
-                ['ไม่เคลื่อนไหว 30+ วัน', summary.inactive30, 'schedule', 'text-amber-700 bg-amber-50'],
-                ['ไม่เคลื่อนไหว 60+ วัน', summary.inactive60, 'hourglass_bottom', 'text-orange-700 bg-orange-50'],
-                ['ไม่เคลื่อนไหว 90+ วัน', summary.inactive90, 'warning_amber', 'text-rose-700 bg-rose-50'],
-                ['ไม่พบประวัติเคลื่อนไหว', summary.neverMoved, 'history_toggle_off', 'text-slate-700 bg-slate-100']
+                ['สินค้าทั้งหมด', summary.masterProductCount, 'inventory_2', 'text-brand-blue bg-blue-50 hover:bg-blue-100', 'all'],
+                ['เคลื่อนไหวในช่วง', summary.movedProductCount, 'local_shipping', 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100', 'active'],
+                ['รอบจัดส่งจริง', summary.fulfilledRounds, 'repeat', 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100', 'active'],
+                ['ปริมาณจัดส่งจริง', summary.fulfilledQty, 'scale', 'text-brand-orange bg-orange-50 hover:bg-orange-100', 'active'],
+                ['ไม่เคลื่อนไหว 30+ วัน', summary.inactive30, 'schedule', 'text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300', 'inactive30'],
+                ['ไม่เคลื่อนไหว 60+ วัน', summary.inactive60, 'hourglass_bottom', 'text-orange-700 bg-orange-50 hover:bg-orange-100 border border-orange-300', 'inactive60'],
+                ['ไม่เคลื่อนไหว 90+ วัน', summary.inactive90, 'warning_amber', 'text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-300', 'inactive90'],
+                ['ไม่พบประวัติเคลื่อนไหว', summary.neverMoved, 'history_toggle_off', 'text-slate-700 bg-slate-100 hover:bg-slate-200', 'never']
             ];
+
+            const totalInactive30Plus = (summary.inactive30 || 0) + (summary.inactive60 || 0) + (summary.inactive90 || 0);
 
             return `
                 ${state.productMovementLoading ? '<div role="status" aria-live="polite" class="bg-blue-50 border border-blue-100 text-blue-700 rounded-xl px-3 py-2 text-xs font-bold">กำลังรีเฟรชรายงาน...</div>' : ''}
@@ -3823,7 +3856,39 @@
 
                 ${renderMovementPeriodComparison(data)}
 
-                <section class="grid grid-cols-2 lg:grid-cols-4 gap-3">${kpis.map(([label, value, icon, cls]) => `<div class="rounded-2xl p-3 ${cls}"><span class="material-icons-round text-[19px]">${icon}</span><p class="text-[10px] font-bold opacity-75 mt-1">${label}</p><p class="text-xl font-black mt-0.5">${Number(value || 0).toLocaleString()}</p></div>`).join('')}</section>
+                <!-- Alert Box: สินค้าไม่เคลื่อนไหวเกิน 30 วัน (เสี่ยงหมดอายุไว) -->
+                <section class="bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/5 rounded-2xl border-2 border-amber-300 p-4 shadow-sm">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div class="flex items-start gap-3">
+                            <span class="material-icons-round text-amber-600 bg-white shadow-sm rounded-xl p-2.5 text-[26px]">notification_important</span>
+                            <div>
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <h3 class="text-sm font-black text-slate-800">สินค้าไม่เคลื่อนไหวเกิน 30 วัน</h3>
+                                    <span class="text-[10px] font-bold text-rose-700 bg-rose-100 border border-rose-200 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                                        <span class="material-icons-round text-[11px]">alarm</span> เสี่ยงหมดอายุไว
+                                    </span>
+                                </div>
+                                <p class="text-xs text-slate-600 mt-1">
+                                    พบสินค้าที่ไม่มีการเบิกจ่ายเกิน 30 วันทั้งหมด <b class="text-amber-800 font-black">${totalInactive30Plus.toLocaleString()}</b> รายการ (และยังไม่เคยเคลื่อนไหว ${Number(summary.neverMoved || 0).toLocaleString()} รายการ)
+                                </p>
+                            </div>
+                        </div>
+                        <button onclick="setProductMovementFilter('state', 'inactive30'); setProductMovementFilter('sort', 'inactive');" 
+                                class="whitespace-nowrap px-4 py-2.5 bg-amber-600 hover:bg-amber-700 active:scale-[0.98] text-white rounded-xl text-xs font-black shadow-md shadow-amber-600/30 flex items-center justify-center gap-1.5 transition-all">
+                            <span class="material-icons-round text-[16px]">visibility</span>
+                            ดูสินค้าหยุดนิ่ง 30+ วัน ทันที
+                        </button>
+                    </div>
+                </section>
+
+                <section class="grid grid-cols-2 lg:grid-cols-4 gap-3">${kpis.map(([label, value, icon, cls, filterState]) => `
+                    <button onclick="setProductMovementFilter('state', '${filterState}'); ${filterState.startsWith('inactive') ? "setProductMovementFilter('sort', 'inactive');" : ''}"
+                            class="text-left rounded-2xl p-3 border transition-all hover:scale-[1.02] active:scale-[0.98] shadow-sm ${cls} ${state.productMovementState === filterState ? 'ring-2 ring-brand-blue font-bold shadow-md' : 'border-transparent'}">
+                        <span class="material-icons-round text-[19px]">${icon}</span>
+                        <p class="text-[10px] font-bold opacity-75 mt-1">${label}</p>
+                        <p class="text-xl font-black mt-0.5">${Number(value || 0).toLocaleString()}</p>
+                    </button>
+                `).join('')}</section>
 
                 <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     ${renderMovementLeaderboard('เคลื่อนไหวบ่อย', 'repeat', frequent, 'fulfilledRounds', 'รอบ')}
@@ -3836,7 +3901,7 @@
                         <label><span class="block text-[10px] font-bold text-slate-500 mb-1">ชั้น</span><select onchange="setProductMovementFilter('floor', this.value)" class="w-full h-12 px-3 rounded-xl bg-slate-50 border border-slate-200 text-base"><option value="">ทุกชั้น</option>${floors.map(value => `<option value="${esc(value)}" ${value === state.productMovementFloor ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select></label>
                         <label><span class="block text-[10px] font-bold text-slate-500 mb-1">Zone / Location</span><select onchange="setProductMovementFilter('location', this.value)" class="w-full h-12 px-3 rounded-xl bg-slate-50 border border-slate-200 text-base"><option value="">ทุกตำแหน่ง</option>${locations.map(value => `<option value="${esc(value)}" ${value === state.productMovementLocation ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select></label>
                         <label><span class="block text-[10px] font-bold text-slate-500 mb-1">สถานะ</span><select onchange="setProductMovementFilter('state', this.value)" class="w-full h-12 px-3 rounded-xl bg-slate-50 border border-slate-200 text-base">
-                            ${[['all','ทั้งหมด'],['active','เคลื่อนไหวในช่วง'],['inactive30','ไม่เคลื่อนไหว 30+ วัน'],['inactive60','ไม่เคลื่อนไหว 60+ วัน'],['inactive90','ไม่เคลื่อนไหว 90+ วัน'],['never','ไม่พบประวัติ'],['attention','ต้องตรวจสอบ'],['historyOnly','มีเฉพาะในประวัติ']].map(([value,label]) => `<option value="${value}" ${value === state.productMovementState ? 'selected' : ''}>${label}</option>`).join('')}
+                            ${[['all','ทั้งหมด'],['active','เคลื่อนไหวในช่วง'],['inactive30','ไม่เคลื่อนไหว 30+ วัน (เสี่ยง EXP)'],['inactive60','ไม่เคลื่อนไหว 60+ วัน'],['inactive90','ไม่เคลื่อนไหว 90+ วัน'],['never','ไม่พบประวัติ'],['attention','ต้องตรวจสอบ'],['historyOnly','มีเฉพาะในประวัติ']].map(([value,label]) => `<option value="${value}" ${value === state.productMovementState ? 'selected' : ''}>${label}</option>`).join('')}
                         </select></label>
                     </div>
                     <div class="flex flex-wrap items-end justify-between gap-2">
@@ -3867,6 +3932,18 @@
             return `
                 <button onclick="clearAnalyticsProduct()" class="min-h-11 text-xs font-bold text-brand-blue inline-flex items-center gap-1"><span class="material-icons-round text-[17px]">arrow_back</span>กลับไปรายงาน</button>
                 <section class="bg-brand-blue text-white rounded-2xl p-5 relative overflow-hidden"><span class="material-icons-round absolute -right-4 -bottom-4 text-[90px] opacity-10">inventory_2</span><h2 class="text-xl font-black pr-10">${esc(product.name)}</h2><p class="text-xs text-white/75 mt-2">${esc(product.isNostk ? 'NOSTK' : [product.floor ? `ชั้น ${product.floor}` : '', product.location || ''].filter(Boolean).join(' · ') || 'ยังไม่ระบุตำแหน่ง')} · Par ${product.parLevel || 0} ${esc(product.unit || 'หน่วย')}</p><span class="inline-block mt-3 text-[10px] font-bold px-2 py-1 rounded-full bg-white/15 border border-white/20">${esc(status.label)}</span></section>
+                
+                <div class="flex flex-wrap gap-2.5 my-1">
+                    <button onclick="quickOrderFromAnalytics('${esc(product.name)}', '${esc(product.unit || 'ชิ้น')}')" class="flex-1 min-h-12 py-2.5 px-4 bg-brand-orange text-white rounded-xl font-bold text-xs shadow-md shadow-brand-orange/20 flex items-center justify-center gap-1.5 hover:bg-brand-orange/90 active:scale-[0.98] transition-all">
+                        <span class="material-icons-round text-[18px]">add_shopping_cart</span>
+                        สั่งเบิกรายการนี้ (W1)
+                    </button>
+                    <button onclick="quickEditLocationFromAnalytics('${esc(product.name)}')" class="flex-1 min-h-12 py-2.5 px-4 bg-brand-blue text-white rounded-xl font-bold text-xs shadow-md shadow-brand-blue/20 flex items-center justify-center gap-1.5 hover:bg-brand-blue/90 active:scale-[0.98] transition-all">
+                        <span class="material-icons-round text-[18px]">edit_location_alt</span>
+                        แก้ไข Par / ย้ายตำแหน่ง
+                    </button>
+                </div>
+
                 <section class="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     <div class="bg-blue-50 rounded-2xl p-3"><p class="text-[10px] text-blue-600">ขอเบิก ${productMovementSelectedPeriodLabel()}</p><p class="text-xl font-black text-blue-800">${product.requestedRounds} รอบ</p><p class="text-xs text-blue-600">${product.requestedQty.toLocaleString()} ${esc(product.unit)}</p></div>
                     <div class="bg-emerald-50 rounded-2xl p-3"><p class="text-[10px] text-emerald-600">จัดส่งจริง</p><p class="text-xl font-black text-emerald-800">${product.fulfilledRounds} รอบ</p><p class="text-xs text-emerald-600">${product.fulfilledQty.toLocaleString()} ${esc(product.unit)}</p></div>
