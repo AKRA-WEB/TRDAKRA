@@ -151,7 +151,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260830.01";
+        const CURRENT_VERSION = "20260830.02";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -1351,10 +1351,12 @@
             state.fullHistoryError = '';
             if (options.renderStart) render();
             try {
-                const res = await fetch(itemsUrl());
+                const headers = sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {};
+                const res = await fetch(`${TRD_API_URL}?action=getFullHistory`, { headers });
                 if (!res.ok) throw new Error('http_' + res.status);
-                const fullItems = await res.json();
-                state.items = mergeItemsById(state.items, fullItems || []);
+                const data = await res.json();
+                const list = Array.isArray(data) ? data : (data && (data.items || data.records)) || [];
+                state.items = mergeItemsById(state.items, list);
                 state.fullHistoryLoaded = true;
             } catch (error) {
                 console.error('Full history load failed:', error);
@@ -3140,8 +3142,9 @@
             try {
                 const refreshParam = forceRefresh ? '&refresh=1' : '';
                 const weekParam = state.productMovementPeriod === 'week' ? `&week=${encodeURIComponent(state.productMovementWeek)}` : '';
-                const url = `${APPS_SCRIPT_URL}?action=getProductMovementReport&period=${encodeURIComponent(state.productMovementPeriod)}${weekParam}${refreshParam}${productMovementPerfParam()}`;
-                const response = await fetch(url);
+                const url = `${TRD_API_URL}?action=getProductMovementReport&period=${encodeURIComponent(state.productMovementPeriod)}${weekParam}${refreshParam}${productMovementPerfParam()}`;
+                const headers = sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {};
+                const response = await fetch(url, { headers });
                 if (!response.ok) throw new Error(`http_${response.status}`);
                 const data = await response.json();
                 if (!data || data.status !== 'success' || !Array.isArray(data.products)) {
@@ -3169,8 +3172,9 @@
             state.productMovementDetailError = '';
             render();
             try {
-                const url = `${APPS_SCRIPT_URL}?action=getProductMovementDetail&product=${encodeURIComponent(target)}&limit=30${productMovementPerfParam()}`;
-                const response = await fetch(url);
+                const url = `${TRD_API_URL}?action=getProductMovementDetail&product=${encodeURIComponent(target)}&limit=30${productMovementPerfParam()}`;
+                const headers = sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {};
+                const response = await fetch(url, { headers });
                 if (!response.ok) throw new Error(`http_${response.status}`);
                 const data = await response.json();
                 if (!data || data.status !== 'success' || !Array.isArray(data.records)) {
