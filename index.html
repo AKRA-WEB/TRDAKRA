@@ -151,8 +151,13 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260820.04";
+        const CURRENT_VERSION = "20260830.01";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
+
+        const SUPABASE_CONFIG = {
+            URL: "https://hgxrrskztbpejirrdpbq.supabase.co"
+        };
+        const TRD_API_URL = "https://hgxrrskztbpejirrdpbq.supabase.co/functions/v1/trd-api";
 
         const SSO_CONFIG = {
             PORTAL_URL:     "https://akra-web.github.io/Main/",
@@ -164,9 +169,8 @@
         let currentUser = null;
         let sessionToken = null;  // SSO token ที่ verify แล้ว ใช้แนบกับทุก mutation POST
 
-        // แนบ token ไปกับ URL ของ mutation request (GAS อ่านจาก e.parameter.token)
         function authUrl() {
-            return APPS_SCRIPT_URL + (sessionToken ? '?token=' + encodeURIComponent(sessionToken) : '');
+            return TRD_API_URL;
         }
 
         // escape ค่าที่ไม่น่าเชื่อถือ (จาก Sheet/ผู้ใช้) ก่อนใส่ใน HTML text หรือ attribute ที่ครอบด้วย " " (กัน XSS)
@@ -514,7 +518,7 @@
         }
         function itemsUrl(days) {
             const suffix = days ? `&days=${encodeURIComponent(days)}` : '';
-            return `${APPS_SCRIPT_URL}?action=getItems${suffix}`;
+            return `${TRD_API_URL}?action=getItems${suffix}`;
         }
         function mapItemData(item) {
             return {
@@ -1363,8 +1367,6 @@
         }
 
         async function fetchInitialData(isRefresh = false, skipHideLoading = false) {
-            if (!APPS_SCRIPT_URL) { hideLoading(); alert('กรุณาใส่ APPS_SCRIPT_URL ก่อนใช้งาน'); return; }
-
             const startTotal = performance.now();
             let hasUsableCache = false;
             if (!isRefresh) {
@@ -1381,23 +1383,17 @@
             } else { showLoading('กำลังรีเฟรชข้อมูล...'); }
 
             try {
-                // Fetch items and products in parallel for performance quick win
                 const startFetch = performance.now();
-                const [itemsResponse, productsResponse] = await Promise.all([
-                    fetch(itemsUrl(INVENTORY_WINDOW_DAYS)),
-                    fetch(`${APPS_SCRIPT_URL}?action=getProducts`)
-                ]);
+                const headers = sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {};
+                const res = await fetch(`${TRD_API_URL}?action=getInitialData&days=${INVENTORY_WINDOW_DAYS}`, { headers });
+                if (!res.ok) throw new Error('http_' + res.status);
+                const data = await res.json();
                 const durationFetch = ((performance.now() - startFetch) / 1000).toFixed(2);
 
-                const startParse = performance.now();
-                const [itemsData, productsData] = await Promise.all([
-                    itemsResponse.json(),
-                    productsResponse.json()
-                ]);
-                const durationParse = ((performance.now() - startParse) / 1000).toFixed(2);
+                const itemsData = data.items || [];
+                const productsData = data.products || [];
 
-                const startRender = performance.now();
-                state.items = (itemsData || []).map(mapItemData);
+                state.items = itemsData.map(mapItemData);
                 state.fullHistoryLoaded = false;
                 state.fullHistoryLoading = false;
                 state.fullHistoryError = '';
@@ -1406,24 +1402,25 @@
                         if (typeof p === 'object' && p !== null) {
                             return {
                                 name: p.name || p.itemName || p[0] || '',
-                                unit: p.unit || p[1] || 'หน่วย',
+                                unit: p.unit || p[1] || 'ชิ้น',
                                 floor: p.floor || '',
                                 location: p.location || '',
-                                parLevel: parseInt(p.parLevel) || 0
+                                parLevel: parseInt(p.parLevel) || 0,
+                                category: p.category || '',
+                                subname: p.subname || ''
                             };
                         }
-                        return { name: String(p).trim(), unit: 'หน่วย', floor: '', location: '', parLevel: 0 };
+                        return { name: String(p).trim(), unit: 'ชิ้น', floor: '', location: '', parLevel: 0 };
                     }).filter(p => p.name !== '');
                 } else { state.products = []; }
 
                 setCache('TRDAKRA_DATA', { windowDays: INVENTORY_WINDOW_DAYS, rawItems: itemsData, products: state.products });
                 render();
                 if (needsFullHistoryForCurrentView()) ensureFullHistoryLoaded({ renderStart: true });
-                const durationRender = ((performance.now() - startRender) / 1000).toFixed(2);
                 
                 const durationTotal = ((performance.now() - startTotal) / 1000).toFixed(2);
                 if (window.location.search.includes('perf=1')) {
-                    console.log(`[PERF] fetchInitialData: total=${durationTotal}s, fetch=${durationFetch}s, parse=${durationParse}s, render=${durationRender}s`);
+                    console.log(`[PERF] fetchInitialData: total=${durationTotal}s, fetch=${durationFetch}s`);
                 }
             } catch (error) {
                 console.error('Error fetching data:', error);
@@ -1439,7 +1436,10 @@
         async function postMutation(payload) {
             const res = await fetch(authUrl(), {
                 method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': sessionToken ? `Bearer ${sessionToken}` : ''
+                },
                 body: JSON.stringify(payload)
             });
             if (!res.ok) throw new Error('http_' + res.status);
@@ -1747,15 +1747,20 @@
             state.surveyLogsError = '';
             render();
             try {
-                const res = await fetch(`${APPS_SCRIPT_URL}?action=getSurveyLogMonthly&month=${encodeURIComponent(selectedMonth)}`);
+                const headers = sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {};
+                const res = await fetch(`${TRD_API_URL}?action=getSurveyLogMonthly&month=${encodeURIComponent(selectedMonth)}`, { headers });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                if (!data || data.status !== 'success' || !Array.isArray(data.details)) {
+                if (!data || data.status !== 'success' || !Array.isArray(data.records || data.details)) {
                     throw new Error(data && data.message ? data.message : 'Invalid SurveyLog response');
                 }
                 if (requestId !== state.surveyLogsRequestId) return;
-                state.surveyLogs = data;
-                state.surveyMonthKey = data.monthKey || selectedMonth;
+                state.surveyLogs = {
+                    status: 'success',
+                    monthKey: selectedMonth,
+                    details: data.records || data.details || []
+                };
+                state.surveyMonthKey = selectedMonth;
             } catch(e) {
                 if (requestId !== state.surveyLogsRequestId) return;
                 console.error('SurveyLog history error', e);
@@ -1979,13 +1984,6 @@
             state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' }];
             state.w1Tab = 'pending';
             render();
-
-            // อัปเดต Floor/Location/ParLevel กลับ Product Sheet
-            for (const row of validRows) {
-                if (row.itemName && (row.floor || row.location || row.parLevel)) {
-                    pushProductDetails(row.itemName, row.floor, row.location, row.parLevel);
-                }
-            }
 
             hideLoading();
 
