@@ -151,7 +151,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260830.02";
+        const CURRENT_VERSION = "20260830.03";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -3134,29 +3134,281 @@
             return Date.now() - generatedAt > Number(report.maxStaleSeconds || 120) * 1000;
         }
 
+        function computeProductMovementReportClient(periodKey = state.productMovementPeriod || '30', weekKey = state.productMovementWeek || '') {
+            const now = new Date();
+            const DAY_MS = 86400000;
+            let curStart, curEnd, priorStart, priorEnd;
+            let isCurrentWeek = false;
+
+            if (periodKey === 'week') {
+                const nowDay = now.getDay() || 7;
+                const thisMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - nowDay + 1, 0, 0, 0, 0);
+                if (!weekKey || weekKey === productMovementIsoWeekValue(now)) {
+                    isCurrentWeek = true;
+                    curStart = thisMonday;
+                    curEnd = now;
+                    const duration = curEnd.getTime() - curStart.getTime();
+                    priorStart = new Date(thisMonday.getTime() - 7 * DAY_MS);
+                    priorEnd = new Date(priorStart.getTime() + duration);
+                } else {
+                    const [yStr, wStr] = weekKey.split('-W');
+                    const y = parseInt(yStr, 10);
+                    const w = parseInt(wStr, 10);
+                    const simple = new Date(y, 0, 1 + (w - 1) * 7);
+                    const dow = simple.getDay() || 7;
+                    const mon = new Date(simple.getFullYear(), simple.getMonth(), simple.getDate() - dow + 1, 0, 0, 0, 0);
+                    curStart = mon;
+                    curEnd = new Date(mon.getTime() + 7 * DAY_MS - 1);
+                    priorStart = new Date(mon.getTime() - 7 * DAY_MS);
+                    priorEnd = new Date(mon.getTime() - 1);
+                }
+            } else {
+                const d = parseInt(periodKey, 10) || 30;
+                curEnd = now;
+                curStart = new Date(now.getTime() - d * DAY_MS);
+                priorEnd = new Date(curStart.getTime());
+                priorStart = new Date(curStart.getTime() - d * DAY_MS);
+            }
+
+            const curStartMs = curStart.getTime();
+            const curEndMs = curEnd.getTime();
+            const priorStartMs = priorStart.getTime();
+            const priorEndMs = priorEnd.getTime();
+
+            const itemMap = {};
+            (state.items || []).forEach(item => {
+                const name = (item.itemName || '').trim();
+                if (!name) return;
+                if (!itemMap[name]) itemMap[name] = [];
+                itemMap[name].push(item);
+            });
+
+            const reqBuckets = [];
+            const dispBuckets = [];
+            const hours = [6, 8, 10, 12, 14, 16, 18, 20];
+            hours.forEach(h => {
+                const endH = h + 2;
+                const label = `${String(h).padStart(2, '0')}:00 – ${String(endH).padStart(2, '0')}:00`;
+                reqBuckets.push({ startHour: h, label, currentRounds: 0, currentQty: 0, priorRounds: 0, priorQty: 0 });
+                dispBuckets.push({ startHour: h, label, currentRounds: 0, currentQty: 0, priorRounds: 0, priorQty: 0 });
+            });
+
+            function addToBucket(buckets, date, qty, isCurrent) {
+                if (!date || isNaN(date.getTime())) return;
+                const h = date.getHours();
+                let b = buckets.find(x => h >= x.startHour && h < x.startHour + 2);
+                if (!b && buckets.length > 0) {
+                    b = h < buckets[0].startHour ? buckets[0] : buckets[buckets.length - 1];
+                }
+                if (b) {
+                    if (isCurrent) { b.currentRounds += 1; b.currentQty += qty; }
+                    else { b.priorRounds += 1; b.priorQty += qty; }
+                }
+            }
+
+            let totalRequestedQty = 0, totalPriorRequestedQty = 0;
+            let totalRequestedRounds = 0, totalPriorRequestedRounds = 0;
+            let totalFulfilledRounds = 0, totalFulfilledQty = 0;
+            let movedCount = 0, in30 = 0, in60 = 0, in90 = 0, never = 0;
+
+            const productRows = (state.products || []).map(p => {
+                const name = (p.name || '').trim();
+                const items = itemMap[name] || [];
+                const unit = p.unit || 'ชิ้น';
+                const floor = p.floor || '';
+                const location = p.location || '';
+                const parLevel = parseInt(p.parLevel) || 0;
+                const isNostk = floor === 'NOSTK';
+
+                let reqRounds = 0, reqQty = 0, priorReqRounds = 0, priorReqQty = 0;
+                let fulRounds = 0, fulQty = 0, priorFulRounds = 0, priorFulQty = 0;
+                const fulfilledQtys = [];
+                let leadTimeTotal = 0, leadTimeCount = 0;
+                let latestMove = null;
+                let pendingRounds = 0, partialCount = 0, stockoutCount = 0, cancelledCount = 0;
+                let shortageQty = 0;
+
+                items.forEach(item => {
+                    const reqDate = item.rawDate ? new Date(item.rawDate) : parseCustomDate(item.timestamp);
+                    const dispDate = item.dispatchTimestamp ? parseCustomDate(item.dispatchTimestamp) : null;
+                    const qReq = parseInt(item.requestQty) || 0;
+                    const qRec = getActualReceivedQty(item);
+                    const status = item.status || '';
+
+                    const moveDate = dispDate || reqDate;
+                    if (moveDate && (!latestMove || moveDate > latestMove)) {
+                        latestMove = moveDate;
+                    }
+
+                    if (reqDate && reqDate.getTime() >= curStartMs && reqDate.getTime() <= curEndMs) {
+                        reqRounds++;
+                        reqQty += qReq;
+                        if (['สั่งเบิก', 'เบิก', 'กำลังจัดส่ง', 'รอตรวจสอบ'].includes(status)) pendingRounds++;
+                        if (status === 'สินค้าหมด') stockoutCount++;
+                        if (status === 'ยกเลิกรายการ' || status === 'ยกเลิก') cancelledCount++;
+                        if (status === 'จัดส่งไม่ครบ') {
+                            partialCount++;
+                            shortageQty += Math.max(0, qReq - qRec);
+                        }
+                        addToBucket(reqBuckets, reqDate, qReq, true);
+                    } else if (reqDate && reqDate.getTime() >= priorStartMs && reqDate.getTime() <= priorEndMs) {
+                        priorReqRounds++;
+                        priorReqQty += qReq;
+                        addToBucket(reqBuckets, reqDate, qReq, false);
+                    }
+
+                    if (['จัดส่งแล้ว', 'รับสินค้าแล้ว', 'จัดส่งไม่ครบ'].includes(status)) {
+                        const fDate = dispDate || reqDate;
+                        if (fDate && fDate.getTime() >= curStartMs && fDate.getTime() <= curEndMs) {
+                            fulRounds++;
+                            fulQty += qRec;
+                            fulfilledQtys.push(qRec);
+                            if (dispDate && reqDate) {
+                                const diffHours = (dispDate.getTime() - reqDate.getTime()) / 3600000;
+                                if (diffHours >= 0 && diffHours < 168) {
+                                    leadTimeTotal += diffHours;
+                                    leadTimeCount++;
+                                }
+                            }
+                            addToBucket(dispBuckets, fDate, qRec, true);
+                        } else if (fDate && fDate.getTime() >= priorStartMs && fDate.getTime() <= priorEndMs) {
+                            priorFulRounds++;
+                            priorFulQty += qRec;
+                            addToBucket(dispBuckets, fDate, qRec, false);
+                        }
+                    }
+                });
+
+                fulfilledQtys.sort((a, b) => a - b);
+                const avgFul = fulRounds > 0 ? Math.round(fulQty / fulRounds) : null;
+                const medianFul = fulfilledQtys.length > 0 ? fulfilledQtys[Math.floor(fulfilledQtys.length / 2)] : null;
+                const maxFul = fulfilledQtys.length > 0 ? fulfilledQtys[fulfilledQtys.length - 1] : null;
+                const medianLead = leadTimeCount > 0 ? Math.round((leadTimeTotal / leadTimeCount) * 10) / 10 : null;
+
+                const daysInactive = latestMove ? Math.floor((now.getTime() - latestMove.getTime()) / DAY_MS) : 999;
+                let movementState = 'never';
+                if (!latestMove) {
+                    movementState = 'never';
+                    never++;
+                } else if (fulRounds > 0) {
+                    movementState = 'active';
+                    movedCount++;
+                } else if (daysInactive >= 90) {
+                    movementState = 'inactive90';
+                    in90++;
+                } else if (daysInactive >= 60) {
+                    movementState = 'inactive60';
+                    in60++;
+                } else if (daysInactive >= 30) {
+                    movementState = 'inactive30';
+                    in30++;
+                } else {
+                    movementState = 'recent';
+                    movedCount++;
+                }
+
+                const qtyTrendPct = priorFulQty > 0
+                    ? Math.round(((fulQty - priorFulQty) / priorFulQty) * 100)
+                    : (fulQty > 0 ? 100 : (priorFulQty > 0 ? -100 : null));
+
+                const fulfillmentRate = reqQty > 0 ? Math.round((fulQty / reqQty) * 100) : (fulQty > 0 ? 100 : null);
+
+                totalRequestedQty += reqQty;
+                totalPriorRequestedQty += priorReqQty;
+                totalRequestedRounds += reqRounds;
+                totalPriorRequestedRounds += priorReqRounds;
+                totalFulfilledRounds += fulRounds;
+                totalFulfilledQty += fulQty;
+
+                return {
+                    name,
+                    floor,
+                    location,
+                    unit,
+                    parLevel,
+                    isNostk,
+                    inProductMaster: true,
+                    movementState,
+                    daysInactive: latestMove ? daysInactive : null,
+                    latestMovementAt: latestMove ? latestMove.toISOString() : null,
+                    requestedRounds: reqRounds,
+                    requestedQty: reqQty,
+                    priorRequestedQty: priorReqQty,
+                    fulfilledRounds: fulRounds,
+                    fulfilledQty: fulQty,
+                    priorFulfilledQty: priorFulQty,
+                    averageFulfilledQty: avgFul,
+                    medianFulfilledQty: medianFul,
+                    maxFulfilledQty: maxFul,
+                    qtyTrendPct,
+                    fulfillmentRate,
+                    medianLeadTimeHours: medianLead,
+                    pendingRounds,
+                    partialCount,
+                    stockoutCount,
+                    cancelledCount,
+                    shortageQty
+                };
+            });
+
+            const requestedQtyTrendPct = totalPriorRequestedQty > 0
+                ? Math.round(((totalRequestedQty - totalPriorRequestedQty) / totalPriorRequestedQty) * 100)
+                : (totalRequestedQty > 0 ? 100 : 0);
+
+            const requestedRoundsTrendPct = totalPriorRequestedRounds > 0
+                ? Math.round(((totalRequestedRounds - totalPriorRequestedRounds) / totalPriorRequestedRounds) * 100)
+                : (totalRequestedRounds > 0 ? 100 : 0);
+
+            return {
+                status: 'success',
+                generatedAt: now.toISOString(),
+                period: {
+                    key: periodKey,
+                    selectedWeek: weekKey || null,
+                    isCurrentWeek,
+                    start: curStart.toISOString(),
+                    end: curEnd.toISOString(),
+                    priorStart: priorStart.toISOString(),
+                    priorEnd: priorEnd.toISOString()
+                },
+                summary: {
+                    masterProductCount: (state.products || []).length,
+                    movedProductCount: movedCount,
+                    fulfilledRounds: totalFulfilledRounds,
+                    fulfilledQty: totalFulfilledQty,
+                    inactive30: in30,
+                    inactive60: in60,
+                    inactive90: in90,
+                    neverMoved: never,
+                    requestedQty: totalRequestedQty,
+                    priorRequestedQty: totalPriorRequestedQty,
+                    requestedQtyTrendPct,
+                    requestedRounds: totalRequestedRounds,
+                    priorRequestedRounds: totalPriorRequestedRounds,
+                    requestedRoundsTrendPct
+                },
+                timeOfDay: {
+                    requestBuckets: reqBuckets,
+                    dispatchBuckets: dispBuckets
+                },
+                products: productRows
+            };
+        }
+
         async function fetchProductMovementReport(forceRefresh = false) {
             const requestId = ++state.productMovementRequestId;
+            if (state.products && state.products.length > 0) {
+                state.productMovementReport = computeProductMovementReportClient();
+            }
             state.productMovementLoading = true;
             state.productMovementError = '';
             render();
             try {
-                const refreshParam = forceRefresh ? '&refresh=1' : '';
-                const weekParam = state.productMovementPeriod === 'week' ? `&week=${encodeURIComponent(state.productMovementWeek)}` : '';
-                const url = `${TRD_API_URL}?action=getProductMovementReport&period=${encodeURIComponent(state.productMovementPeriod)}${weekParam}${refreshParam}${productMovementPerfParam()}`;
-                const headers = sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {};
-                const response = await fetch(url, { headers });
-                if (!response.ok) throw new Error(`http_${response.status}`);
-                const data = await response.json();
-                if (!data || data.status !== 'success' || !Array.isArray(data.products)) {
-                    throw new Error(data && data.reason ? data.reason : 'invalid_report_response');
-                }
-                if (requestId !== state.productMovementRequestId) return;
-                state.productMovementReport = data;
+                await ensureFullHistoryLoaded();
+                state.productMovementReport = computeProductMovementReportClient();
                 if (state.productSelected) fetchProductMovementDetail(state.productSelected);
             } catch (error) {
-                if (requestId !== state.productMovementRequestId) return;
-                console.error('Product movement report failed:', error);
-                state.productMovementError = 'โหลดรายงานการเคลื่อนไหวสินค้าไม่สำเร็จ';
+                console.error('Product movement report error:', error);
             } finally {
                 if (requestId !== state.productMovementRequestId) return;
                 state.productMovementLoading = false;
@@ -3172,19 +3424,31 @@
             state.productMovementDetailError = '';
             render();
             try {
-                const url = `${TRD_API_URL}?action=getProductMovementDetail&product=${encodeURIComponent(target)}&limit=30${productMovementPerfParam()}`;
-                const headers = sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {};
-                const response = await fetch(url, { headers });
-                if (!response.ok) throw new Error(`http_${response.status}`);
-                const data = await response.json();
-                if (!data || data.status !== 'success' || !Array.isArray(data.records)) {
-                    throw new Error(data && data.reason ? data.reason : 'invalid_detail_response');
-                }
-                if (requestId !== state.productMovementDetailRequestId || state.productSelected !== target) return;
-                state.productMovementDetail = data;
+                await ensureFullHistoryLoaded();
+                const matched = (state.items || []).filter(i => (i.itemName || '').trim() === target);
+                const records = matched.map(i => {
+                    const reqQty = parseInt(i.requestQty) || 0;
+                    const recQty = getActualReceivedQty(i);
+                    return {
+                        id: i.id,
+                        status: i.status,
+                        requestedBy: i.requestedBy,
+                        requestQty: reqQty,
+                        actualQty: recQty,
+                        shortageQty: Math.max(0, reqQty - recQty),
+                        requestAt: i.rawDate ? (new Date(i.rawDate).toISOString()) : (i.timestamp || ''),
+                        dispatchAt: i.dispatchTimestamp ? (parseCustomDate(i.dispatchTimestamp).toISOString()) : null
+                    };
+                });
+                state.productMovementDetail = {
+                    status: 'success',
+                    product: target,
+                    records: records,
+                    totalCount: records.length
+                };
             } catch (error) {
                 if (requestId !== state.productMovementDetailRequestId) return;
-                console.error('Product movement detail failed:', error);
+                console.error('Product movement detail error:', error);
                 state.productMovementDetailError = 'โหลดประวัติรายรอบไม่สำเร็จ';
             } finally {
                 if (requestId !== state.productMovementDetailRequestId) return;
