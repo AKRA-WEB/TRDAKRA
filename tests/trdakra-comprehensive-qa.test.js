@@ -126,7 +126,7 @@ async function runDatabaseTests() {
   assert(initData.items.length > 0, 'Items within window must be returned');
   console.log(`[PASS] 2.3 Initial Data RPC Verified: ${initData.products.length} products loaded cleanly`);
 
-  // Mutation Invariant Check: Delta Mutation
+  // Mutation Invariant Check: Delta Mutation (Object format)
   const deltaRes = await db.query(`
     SELECT public.mutate_trd_inventory_delta(
       jsonb_build_object(
@@ -136,7 +136,7 @@ async function runDatabaseTests() {
             'itemName', 'สินค้าทดสอบเบิก',
             'requestQty', 10,
             'storageCapacity', 20,
-            'status', 'เบิก',
+            'status', 'สั่งเบิก',
             'requestedBy', 'Tester'
           )
         )
@@ -146,7 +146,36 @@ async function runDatabaseTests() {
   `);
   assert.strictEqual(deltaRes.rows[0].result.status, 'success');
   assert.strictEqual(deltaRes.rows[0].result.inserted, 1);
-  console.log('[PASS] 2.4 Transactional Delta Mutation Verified');
+  console.log('[PASS] 2.4 Transactional Delta Mutation (Object format) Verified');
+
+  // Mutation Invariant Check: Delta Mutation (Array format from Zone Check / W1 / W2)
+  const arrayOrderRes = await db.query(`
+    SELECT public.mutate_trd_inventory_delta(
+      jsonb_build_array(
+        jsonb_build_object(
+          'op', 'append',
+          'item', jsonb_build_object(
+            'id', 'TEST-ZONE-ORD-123',
+            'itemName', 'สินค้าทดสอบเบิกรายโซน',
+            'requestQty', 8,
+            'storageCapacity', 15,
+            'status', 'สั่งเบิก',
+            'requestedBy', 'Zone Surveyor'
+          )
+        )
+      ),
+      'mutation-zone-123'
+    ) as result;
+  `);
+  assert.strictEqual(arrayOrderRes.rows[0].result.status, 'success');
+  assert.strictEqual(arrayOrderRes.rows[0].result.inserted, 1);
+
+  // Assert it appears in get_trd_initial_data
+  const checkInitial = await db.query('SELECT public.get_trd_initial_data(7) as result;');
+  const foundZoneOrder = checkInitial.rows[0].result.items.find(i => i.id === 'TEST-ZONE-ORD-123');
+  assert(foundZoneOrder, 'Zone check order must be in get_trd_initial_data');
+  assert.strictEqual(foundZoneOrder.status, 'สั่งเบิก');
+  console.log('[PASS] 2.5 Zone Check Stock Order Creation & Immediate "รอจัด" Visibility Verified');
 
   console.log('\n🌟 ALL TRDAKRA SUITES & INVARIANTS PASSED 100%! 🌟');
 }
