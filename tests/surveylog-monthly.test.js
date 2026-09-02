@@ -94,6 +94,8 @@ function formatBangkok(date, timeZone, pattern) {
     if (pattern === 'yyyy-MM-dd_HH:mm') return `${parts.year}-${parts.month}-${parts.day}_${parts.hour}:${parts.minute}`;
     if (pattern === 'yyyy') return parts.year;
     if (pattern === 'dd-MM') return `${parts.day}-${parts.month}`;
+    if (pattern === 'dd-MM-yyyy') return `${parts.day}-${parts.month}-${parts.year}`;
+    if (pattern === 'dd/MM/yyyy') return `${parts.day}/${parts.month}/${parts.year}`;
     if (pattern === 'dd-MM-yyyy / HH:mm น.') {
         return `${parts.day}-${parts.month}-${parts.year} / ${parts.hour}:${parts.minute} น.`;
     }
