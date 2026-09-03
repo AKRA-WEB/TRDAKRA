@@ -377,10 +377,59 @@ const rows = [
     const inlineScript = html.match(/<script>([\s\S]*?)<\/script>/);
     assert.ok(inlineScript, 'index.html inline script must exist');
     new vm.Script(inlineScript[1], { filename: 'index.html' });
-    assert.match(inlineScript[1], /action=getProductMovementReport/);
-    assert.match(inlineScript[1], /action=getProductMovementDetail/);
-    assert.match(inlineScript[1], /requestId !== state\.productMovementRequestId/);
-    assert.match(inlineScript[1], /requestId !== state\.productMovementDetailRequestId/);
+
+    // Behavioral execution of client-side movement report in sandbox
+    const sandbox = {
+        window: {},
+        document: { getElementById: () => ({}) },
+        localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+        location: { hostname: 'localhost', href: '', search: '', pathname: '/' },
+        console,
+        setTimeout,
+        clearTimeout,
+        setInterval,
+        clearInterval,
+        Date,
+        Math,
+        parseInt,
+        parseFloat,
+        isNaN,
+        isFinite,
+        String,
+        Number,
+        Array,
+        Object,
+        JSON,
+        RegExp,
+        navigator: { userAgent: 'node' }
+    };
+    sandbox.window = sandbox;
+    const context = vm.createContext(sandbox);
+    vm.runInContext(inlineScript[1] + '; window.__getTestState = () => state; window.__computeReport = computeProductMovementReportClient;', context);
+
+    const testState = sandbox.__getTestState();
+    testState.products = [
+        { name: 'สินค้า A', unit: 'ชิ้น', floor: '1', location: 'A1', parLevel: 10 },
+        { name: 'สินค้า B', unit: 'ลัง', floor: 'NOSTK', location: 'NOSTK', parLevel: 0 }
+    ];
+    testState.items = [
+        {
+            id: 'REQ-001',
+            itemName: 'สินค้า A',
+            requestQty: '5',
+            receiveQty: '5',
+            status: 'ส่งของแล้ว',
+            rawDate: new Date().toISOString(),
+            dispatchTimestamp: new Date().toISOString()
+        }
+    ];
+
+    const report = sandbox.__computeReport('30');
+    assert.ok(report, 'computeProductMovementReportClient must return a report object');
+    assert.strictEqual(report.summary.requestedQty, 5, 'summary requestedQty must match');
+    assert.strictEqual(report.summary.movedProductCount, 1, 'movedProductCount must be 1');
+    assert.strictEqual(report.products.length, 2, 'must contain 2 products');
+
     const currentVersion = html.match(/const CURRENT_VERSION = "([^"]+)"/);
     const versionConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'version.json'), 'utf8'));
     assert.ok(currentVersion, 'CURRENT_VERSION must exist');
