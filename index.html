@@ -151,7 +151,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260905.01";
+        const CURRENT_VERSION = "20260905.02";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -2416,9 +2416,15 @@
                                         เบิก: ${item.timestamp}
                                     </span>
                                     ${item.requestedBy ? `
-                                        <span class="inline-flex items-center gap-0.5 text-brand-blue bg-brand-blue/5 border border-brand-blue/10 px-1.5 py-0.5 rounded-[4px] text-[9px] font-semibold">
+                                        <span class="inline-flex items-center gap-0.5 text-brand-blue bg-brand-blue/5 border border-brand-blue/10 px-1.5 py-0.5 rounded-[4px] text-[9px] font-semibold" title="ผู้เบิก">
                                             <span class="material-icons-round text-[11px] text-brand-blue/70">account_circle</span>
-                                            ${esc(item.requestedBy)}
+                                            ผู้เบิก: ${esc(item.requestedBy)}
+                                        </span>
+                                    ` : ''}
+                                    ${item.w2Note ? `
+                                        <span class="inline-flex items-center gap-0.5 text-purple-700 bg-purple-50 border border-purple-200/60 px-1.5 py-0.5 rounded-[4px] text-[9px] font-semibold" title="ผู้จัดส่ง">
+                                            <span class="material-icons-round text-[11px] text-purple-600">local_shipping</span>
+                                            ผู้ส่ง: ${esc(item.w2Note)}
                                         </span>
                                     ` : ''}
                                 </div>
@@ -2430,7 +2436,8 @@
                                 <div class="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400">
                                     <span class="inline-flex items-center gap-0.5">
                                         <span class="material-icons-round text-[13px] text-slate-400">event_note</span>
-                                        <span class="font-semibold text-slate-500">เบิก:</span> ${item.timestamp}
+                                        <span class="font-semibold text-slate-500">เวลาเบิก:</span> ${item.timestamp}
+                                        ${item.requestedBy ? `<span class="text-slate-500">(${esc(item.requestedBy)})</span>` : ''}
                                     </span>
                                     ${item.dispatchTimestamp ? `
                                         <span class="inline-flex items-center gap-0.5">
@@ -2453,12 +2460,16 @@
                                                 item.status === 'สินค้าหมด'    ? 'text-rose-600' : 'text-slate-500'
                                             }">
                                                 ${
-                                                    (item.status === 'จัดส่งแล้ว' || item.status === 'รับสินค้าแล้ว') ? 'จัดส่ง:' :
-                                                    item.status === 'รอตรวจรับ'    ? 'จัดส่งแล้ว (รอตรวจรับ):' :
-                                                    item.status === 'จัดส่งไม่ครบ' ? 'จัดส่ง:' :
+                                                    (item.status === 'จัดส่งแล้ว' || item.status === 'รับสินค้าแล้ว') ? 'เวลากดส่ง:' :
+                                                    item.status === 'รอตรวจรับ'    ? 'เวลากดส่ง (รอตรวจรับ):' :
+                                                    item.status === 'จัดส่งไม่ครบ' ? 'เวลากดส่ง:' :
                                                     item.status === 'สินค้าหมด'    ? 'แจ้งหมดเมื่อ:' : 'ยกเลิกเมื่อ:'
                                                 }
                                             </span> ${item.dispatchTimestamp}
+                                            ${item.w2Note ? `<span class="font-medium ${
+                                                (item.status === 'จัดส่งแล้ว' || item.status === 'รับสินค้าแล้ว') ? 'text-emerald-600' :
+                                                item.status === 'รอตรวจรับ' ? 'text-purple-600' : 'text-slate-500'
+                                            }">(${esc(item.w2Note)})</span>` : ''}
                                         </span>
                                     ` : ''}
                                 </div>
@@ -4670,6 +4681,7 @@
             }
 
             const now = formatDateTime(new Date().toISOString());
+            const dispatcherName = currentUser || 'AKRA';
 
             const operations = [];
             for (const [id, edit] of Object.entries(edits)) {
@@ -4677,13 +4689,13 @@
                 if (!item) continue;
                 let patch = null;
                 if (edit === 'dispatch') {
-                    patch = { status: 'รอตรวจรับ', receiveQty: item.requestQty, receiveNote: 'ครบ', dispatchTimestamp: now };
+                    patch = { status: 'รอตรวจรับ', receiveQty: item.requestQty, receiveNote: 'ครบ', dispatchTimestamp: now, w2Note: dispatcherName };
                 } else if (edit === 'partial') {
                     const actual   = (state.w2PartialQty || {})[item.id] || 0;
                     const shortage = item.requestQty - actual;
-                    patch = { status: 'รอตรวจรับ', receiveQty: actual, receiveNote: `ส่ง ${actual}/${item.requestQty} ขาด ${shortage}`, dispatchTimestamp: now };
+                    patch = { status: 'รอตรวจรับ', receiveQty: actual, receiveNote: `ส่ง ${actual}/${item.requestQty} ขาด ${shortage}`, dispatchTimestamp: now, w2Note: dispatcherName };
                 } else if (edit === 'outstock') {
-                    patch = { status: 'สินค้าหมด', dispatchTimestamp: now };
+                    patch = { status: 'สินค้าหมด', dispatchTimestamp: now, w2Note: dispatcherName };
                 }
                 if (patch) {
                     operations.push({ op: 'updateById', id: item.id, patch });
@@ -4696,15 +4708,15 @@
             state.items = state.items.map(item => {
                 const edit = edits[item.id];
                 if (edit === 'dispatch') {
-                    return { ...item, status: 'รอตรวจรับ', receiveQty: item.requestQty, receiveNote: 'ครบ', dispatchTimestamp: now };
+                    return { ...item, status: 'รอตรวจรับ', receiveQty: item.requestQty, receiveNote: 'ครบ', dispatchTimestamp: now, w2Note: dispatcherName };
                 }
                 if (edit === 'partial') {
                     const actual   = (state.w2PartialQty || {})[item.id] || 0;
                     const shortage = item.requestQty - actual;
-                    return { ...item, status: 'รอตรวจรับ', receiveQty: actual, receiveNote: `ส่ง ${actual}/${item.requestQty} ขาด ${shortage}`, dispatchTimestamp: now };
+                    return { ...item, status: 'รอตรวจรับ', receiveQty: actual, receiveNote: `ส่ง ${actual}/${item.requestQty} ขาด ${shortage}`, dispatchTimestamp: now, w2Note: dispatcherName };
                 }
                 if (edit === 'outstock') {
-                    return { ...item, status: 'สินค้าหมด', dispatchTimestamp: now };
+                    return { ...item, status: 'สินค้าหมด', dispatchTimestamp: now, w2Note: dispatcherName };
                 }
                 return item;
             });

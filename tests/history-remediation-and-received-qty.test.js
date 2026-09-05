@@ -16,8 +16,8 @@ const versionJson = JSON.parse(fs.readFileSync(versionJsonPath, 'utf8'));
 console.log('--- TEST 1: Version Parity ---');
 assert.strictEqual(
   versionJson.version,
-  '20260905.01',
-  'version.json must be 20260905.01'
+  '20260905.02',
+  'version.json must be 20260905.02'
 );
 assert(
   indexHtml.includes(`const CURRENT_VERSION = "${versionJson.version}";`),
@@ -199,5 +199,51 @@ const lastDispC = getLastDispatchInfo('แป้ง C');
 assert(lastDispC !== null, 'getLastDispatchInfo must recognize จัดส่งไม่ครบ as dispatched');
 
 console.log('[PASS] getLastDispatchInfo correctly recognizes รอตรวจรับ and จัดส่งไม่ครบ\n');
+
+// 5. Invariant: renderHistoryCards displays requester, request time, dispatcher, dispatch time
+console.log('--- TEST 5: renderHistoryCards Requester & Dispatcher Display ---');
+const { renderHistoryCards } = sandbox;
+assert(typeof renderHistoryCards === 'function', 'renderHistoryCards must be a function');
+
+const testCardItems = [
+  {
+    id: 'REQ-TEST-1',
+    itemName: 'สินค้า ก',
+    status: 'จัดส่งแล้ว',
+    timestamp: '04-09-2569 / 12:00 น.',
+    dispatchTimestamp: '04-09-2569 / 14:00 น.',
+    requestedBy: 'เอี้ยง',
+    w2Note: 'สมชาย',
+    requestQty: 10,
+    receiveQty: 10
+  },
+  {
+    id: 'REQ-TEST-2',
+    itemName: 'สินค้า ข',
+    status: 'รอตรวจรับ',
+    timestamp: '04-09-2569 / 11:30 น.',
+    dispatchTimestamp: '04-09-2569 / 13:45 น.',
+    requestedBy: 'หมูหยอง',
+    w2Note: 'วิชัย',
+    requestQty: 5,
+    receiveQty: 5
+  }
+];
+
+const renderedHtml = renderHistoryCards(testCardItems, 'w2');
+assert(renderedHtml.includes('ผู้เบิก: เอี้ยง'), 'Card 1 must display ผู้เบิก: เอี้ยง');
+assert(renderedHtml.includes('ผู้ส่ง: สมชาย'), 'Card 1 must display ผู้ส่ง: สมชาย');
+assert(renderedHtml.includes('เวลาเบิก:'), 'Card must display label เวลาเบิก:');
+assert(renderedHtml.includes('04-09-2569 / 12:00 น.'), 'Card 1 must display request timestamp');
+assert(renderedHtml.includes('เวลากดส่ง:'), 'Card 1 must display label เวลากดส่ง:');
+assert(renderedHtml.includes('04-09-2569 / 14:00 น.'), 'Card 1 must display dispatch timestamp');
+
+assert(renderedHtml.includes('ผู้เบิก: หมูหยอง'), 'Card 2 must display ผู้เบิก: หมูหยอง');
+assert(renderedHtml.includes('ผู้ส่ง: วิชัย'), 'Card 2 must display ผู้ส่ง: วิชัย');
+assert(renderedHtml.includes('เวลากดส่ง (รอตรวจรับ):'), 'Card 2 must display label เวลากดส่ง (รอตรวจรับ):');
+assert(renderedHtml.includes('04-09-2569 / 13:45 น.'), 'Card 2 must display dispatch timestamp');
+assert(renderedHtml.includes('(วิชัย)'), 'Card 2 must include dispatcher name in dispatch timeline');
+
+console.log('[PASS] renderHistoryCards correctly renders requester, request time, dispatcher, and dispatch time\n');
 
 console.log('🌟 ALL HISTORY REMEDIATION AND RECEIVED QTY TESTS PASSED 100%! 🌟');
