@@ -16,8 +16,8 @@ const versionJson = JSON.parse(fs.readFileSync(versionJsonPath, 'utf8'));
 console.log('--- TEST 1: Version Parity ---');
 assert.strictEqual(
   versionJson.version,
-  '20260905.03',
-  'version.json must be 20260905.03'
+  '20260905.04',
+  'version.json must be 20260905.04'
 );
 assert(
   indexHtml.includes(`const CURRENT_VERSION = "${versionJson.version}";`),
@@ -280,4 +280,28 @@ const pendingSorted = vm.runInContext(`
 assert.strictEqual(pendingSorted[0].id, 'RECHECK-1', 'In pending tab, รอตรวจรับ must appear at the top');
 console.log('[PASS] Awaiting recheck items are strictly pinned to the top in both pending tab and history list\n');
 
+// 7. UX & Batch Recheck Invariants
+console.log('--- TEST 7: UX Default Recheck & Batch Recheck Functionality ---');
+assert(typeof sandbox.confirmRecheckAllItems === 'function', 'confirmRecheckAllItems must be defined');
+
+// Verify default recheck value logic inside sandbox context
+const pendingHtml = vm.runInContext(`
+  state.items = [
+    { id: 'RC-1', itemName: 'สินค้า 1', status: 'รอตรวจรับ', requestQty: 10, receiveQty: 10 },
+    { id: 'RC-2', itemName: 'สินค้า 2', status: 'รอตรวจรับ', requestQty: 20, receiveQty: 15 }
+  ];
+  state.recheckQty = {};
+  state.w1Tab = 'pending';
+  renderW1();
+`, sandbox);
+
+assert(pendingHtml.includes('มีสินค้ามาส่ง 2 รายการ'), 'Pending tab must show batch recheck banner with count 2');
+assert(pendingHtml.includes('รับครบทั้งหมด'), 'Pending tab must have รับครบทั้งหมด button');
+assert(pendingHtml.includes('confirmRecheckAllItems()'), 'Pending tab must call confirmRecheckAllItems()');
+assert(pendingHtml.includes('placeholder="10"'), 'RC-1 input must placeholder="10" (w2Qty)');
+assert(pendingHtml.includes('placeholder="15"'), 'RC-2 input must placeholder="15" (w2Qty)');
+
+console.log('[PASS] UX batch recheck banner and default w2Qty quantity verified\n');
+
 console.log('🌟 ALL HISTORY REMEDIATION AND RECEIVED QTY TESTS PASSED 100%! 🌟');
+

@@ -151,7 +151,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260905.03";
+        const CURRENT_VERSION = "20260905.04";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -2074,15 +2074,15 @@
         async function confirmRecheckItem(itemId) {
             const item = state.items.find(i => i.id === itemId);
             if (!item) return;
-            const recheckVal = (state.recheckQty || {})[itemId];
+            const w2Qty   = parseInt(item.receiveQty != null ? item.receiveQty : item.requestQty) || 0;
+            const requestedQty = parseInt(item.requestQty) || 0;
+            let recheckVal = (state.recheckQty || {})[itemId];
             if (recheckVal === undefined || recheckVal === null || recheckVal === '') {
-                alert('กรุณากรอกจำนวนที่รับจริง'); return;
+                recheckVal = w2Qty;
             }
             const qty = parseInt(recheckVal);
             if (isNaN(qty) || qty < 0) { alert('จำนวนไม่ถูกต้อง'); return; }
             const unit    = getProductUnitClient(item.itemName);
-            const w2Qty   = parseInt(item.receiveQty != null ? item.receiveQty : item.requestQty) || 0;
-            const requestedQty = parseInt(item.requestQty) || 0;
             if (qty > w2Qty) {
                 alert(`จำนวนรับจริงมากกว่ายอดที่ W2 ส่งมา (${w2Qty} ${unit}) กรุณาตรวจสอบอีกครั้ง`);
                 return;
@@ -2102,6 +2102,46 @@
             if (state.recheckQty) delete state.recheckQty[itemId];
             render();
             sendAppLog('ตรวจรับสินค้า (TRD)', `${item.itemName} — ${qty} ${unit} (${newStatus})`);
+        }
+
+        async function confirmRecheckAllItems() {
+            const recheckItems = (state.items || []).filter(i => i.status === 'รอตรวจรับ');
+            if (recheckItems.length === 0) {
+                alert('ไม่มีรายการที่รอตรวจรับ');
+                return;
+            }
+            if (!confirm(`ต้องการยืนยันตรวจรับสินค้าทั้งหมด ${recheckItems.length} รายการ ตามยอดที่คลังส่งมาใช่หรือไม่?`)) {
+                return;
+            }
+            const now = formatDateTime(new Date().toISOString());
+            const mutations = [];
+            const updatedPatches = {};
+
+            for (const item of recheckItems) {
+                const w2Qty = parseInt(item.receiveQty != null ? item.receiveQty : item.requestQty) || 0;
+                const requestedQty = parseInt(item.requestQty) || 0;
+                let userVal = (state.recheckQty || {})[item.id];
+                let qty = (userVal !== undefined && userVal !== null && userVal !== '') ? parseInt(userVal) : w2Qty;
+                if (isNaN(qty) || qty < 0) qty = w2Qty;
+                if (qty > w2Qty) qty = w2Qty;
+
+                const isFull = qty >= requestedQty;
+                const newStatus = isFull ? 'รับสินค้าแล้ว' : 'จัดส่งไม่ครบ';
+                const recheckNote = isFull ? 'ครบ' : `รับจริง ${qty}/${requestedQty} ขาด ${requestedQty - qty}${w2Qty !== requestedQty ? ` (W2 ส่ง ${w2Qty})` : ''}`;
+                const patch = { status: newStatus, recheckQty: qty, recheckAt: now, recheckBy: currentUser || '', recheckNote };
+                mutations.push({ op: 'updateById', id: item.id, patch });
+                updatedPatches[item.id] = patch;
+            }
+
+            const res = await saveInventoryDelta(mutations, { perfName: 'confirmRecheckAll' });
+            if (!res) {
+                await fetchInitialData(true);
+                return;
+            }
+            state.items = state.items.map(i => updatedPatches[i.id] ? { ...i, ...updatedPatches[i.id] } : i);
+            state.recheckQty = {};
+            render();
+            sendAppLog('ตรวจรับสินค้าทั้งหมด (TRD)', `ยืนยันตรวจรับสำเร็จ ${recheckItems.length} รายการ`);
         }
 
         // ==========================================
@@ -4509,7 +4549,25 @@
                 if (pendingItems.length === 0) {
                     content = renderEmptyState('ไม่มีรายการรอรับ', 'check_circle_outline');
                 } else {
-                    content = `<div class="space-y-4 animate-fade-in">` + pendingItems.map(item => {
+                    const awaitingRecheckCount = pendingItems.filter(i => i.status === 'รอตรวจรับ').length;
+                    const batchRecheckHeader = awaitingRecheckCount > 0 ? `
+                        <div class="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl p-4 text-white shadow-lg shadow-purple-500/20 flex items-center justify-between gap-3">
+                            <div class="flex items-center gap-2.5">
+                                <div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                                    <span class="material-icons-round text-white text-xl">mark_email_read</span>
+                                </div>
+                                <div>
+                                    <p class="font-bold text-sm leading-tight">มีสินค้ามาส่ง ${awaitingRecheckCount} รายการ</p>
+                                    <p class="text-[11px] text-white/80">ตรวจนับแล้วกดรับพร้อมกันได้ทันที</p>
+                                </div>
+                            </div>
+                            <button onclick="confirmRecheckAllItems()" class="bg-white text-purple-700 font-bold px-3.5 py-2 rounded-xl text-xs shadow hover:bg-purple-50 active:scale-95 transition-all flex items-center gap-1 flex-shrink-0">
+                                <span class="material-icons-round text-sm">done_all</span> รับครบทั้งหมด
+                            </button>
+                        </div>
+                    ` : '';
+
+                    content = `<div class="space-y-4 animate-fade-in">` + batchRecheckHeader + pendingItems.map(item => {
                         const unit = getProductUnitClient(item.itemName);
                         const enc  = encodeURIComponent(item.id);
                         const itemHeader = `
@@ -4535,7 +4593,7 @@
 
                         if (item.status === 'รอตรวจรับ') {
                             const w2Qty     = parseInt(item.receiveQty != null ? item.receiveQty : item.requestQty) || 0;
-                            const curRecheck = (state.recheckQty || {})[item.id] || '';
+                            const curRecheck = (state.recheckQty || {})[item.id] !== undefined ? state.recheckQty[item.id] : w2Qty;
                             return `
                         <div class="bg-white p-5 rounded-[1.5rem] shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-purple-100 transition-all">
                             ${itemHeader}
@@ -4558,7 +4616,7 @@
                                     <p class="text-[10px] font-bold text-brand-blue mb-1">รับจริง (W2 ส่ง ${w2Qty} ${esc(unit)})</p>
                                     <input type="number" min="0" max="${w2Qty}" inputmode="numeric"
                                            value="${esc(curRecheck)}"
-                                           placeholder="0"
+                                           placeholder="${w2Qty}"
                                            oninput="updateRecheckQty(decodeURIComponent('${enc}'), this.value)"
                                            class="w-full text-center text-lg font-black text-brand-blue bg-brand-blue/5 border border-brand-blue/20 rounded-xl py-2 focus:border-brand-blue focus:outline-none transition-all">
                                 </div>
