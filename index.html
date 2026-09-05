@@ -151,7 +151,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260902.01";
+        const CURRENT_VERSION = "20260905.01";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -1278,7 +1278,7 @@
 
         function getLastDispatchInfo(itemName) {
             const dispatched = state.items.filter(i =>
-                i.itemName === itemName && (i.status === 'จัดส่งแล้ว' || i.status === 'รับสินค้าแล้ว')
+                i.itemName === itemName && (i.status === 'จัดส่งแล้ว' || i.status === 'รับสินค้าแล้ว' || i.status === 'จัดส่งไม่ครบ' || i.status === 'รอตรวจรับ')
             );
             if (dispatched.length === 0) return null;
             let latestDate = null;
@@ -1317,10 +1317,18 @@
         }
         function getActualReceivedQty(item) {
             if (!item) return 0;
-            if (item.recheckQty !== undefined && item.recheckQty !== null && item.recheckQty !== '') {
+            const hasRecheck = !!(
+                item.recheckBy ||
+                item.recheckAt ||
+                (item.recheckQty !== null && item.recheckQty !== undefined && item.recheckQty !== '' && Number(item.recheckQty) > 0)
+            );
+            if (hasRecheck) {
                 return parseInt(item.recheckQty) || 0;
             }
-            return parseInt(item.receiveQty) || 0;
+            if (item.receiveQty !== null && item.receiveQty !== undefined && item.receiveQty !== '') {
+                return parseInt(item.receiveQty) || 0;
+            }
+            return parseInt(item.requestQty) || 0;
         }
         // ชื่อสินค้า (normalize) ที่มีคำขอเบิกค้างอยู่ใน state ปัจจุบัน
         function getActiveRequestNames() {
@@ -2306,7 +2314,7 @@
         }
 
         function getFilteredHistory() {
-            let items = state.items.filter(i => ['จัดส่งแล้ว', 'รับสินค้าแล้ว', 'จัดส่งไม่ครบ', 'ยกเลิกรายการ'].includes(i.status));
+            let items = state.items.filter(i => ['จัดส่งแล้ว', 'รับสินค้าแล้ว', 'จัดส่งไม่ครบ', 'ยกเลิกรายการ', 'รอตรวจรับ'].includes(i.status));
             const q = (state.historySearch || '').toLowerCase().trim();
             if (q) items = items.filter(i =>
                 String(i.itemName || '').toLowerCase().includes(q) ||
@@ -2360,7 +2368,7 @@
 
         function renderHistoryList(role) {
             state._historyRole = role;
-            const allHistory = state.items.filter(i => ['จัดส่งแล้ว', 'รับสินค้าแล้ว', 'จัดส่งไม่ครบ', 'ยกเลิกรายการ'].includes(i.status));
+            const allHistory = state.items.filter(i => ['จัดส่งแล้ว', 'รับสินค้าแล้ว', 'จัดส่งไม่ครบ', 'ยกเลิกรายการ', 'รอตรวจรับ'].includes(i.status));
             const historyNotice = renderFullHistoryNotice();
             if (allHistory.length === 0) {
                 return `<div class="space-y-3">${historyNotice}${renderEmptyState('ไม่มีประวัติย้อนหลัง', 'history_toggle_off')}</div>`;
@@ -2429,10 +2437,11 @@
                                             <span class="material-icons-round text-[13px] ${
                                                 (item.status === 'จัดส่งแล้ว' || item.status === 'รับสินค้าแล้ว') ? 'text-emerald-500' :
                                                 item.status === 'จัดส่งไม่ครบ' ? 'text-amber-500' :
+                                                item.status === 'รอตรวจรับ'    ? 'text-purple-500' :
                                                 item.status === 'สินค้าหมด'    ? 'text-rose-500' : 'text-slate-400'
                                             }">
                                                 ${
-                                                    (item.status === 'จัดส่งแล้ว' || item.status === 'รับสินค้าแล้ว') ? 'local_shipping' :
+                                                    (item.status === 'จัดส่งแล้ว' || item.status === 'รับสินค้าแล้ว' || item.status === 'รอตรวจรับ') ? 'local_shipping' :
                                                     item.status === 'จัดส่งไม่ครบ' ? 'local_shipping' :
                                                     item.status === 'สินค้าหมด'    ? 'error_outline' : 'cancel'
                                                 }
@@ -2440,10 +2449,12 @@
                                             <span class="font-semibold ${
                                                 (item.status === 'จัดส่งแล้ว' || item.status === 'รับสินค้าแล้ว') ? 'text-emerald-600' :
                                                 item.status === 'จัดส่งไม่ครบ' ? 'text-amber-600' :
+                                                item.status === 'รอตรวจรับ'    ? 'text-purple-600' :
                                                 item.status === 'สินค้าหมด'    ? 'text-rose-600' : 'text-slate-500'
                                             }">
                                                 ${
                                                     (item.status === 'จัดส่งแล้ว' || item.status === 'รับสินค้าแล้ว') ? 'จัดส่ง:' :
+                                                    item.status === 'รอตรวจรับ'    ? 'จัดส่งแล้ว (รอตรวจรับ):' :
                                                     item.status === 'จัดส่งไม่ครบ' ? 'จัดส่ง:' :
                                                     item.status === 'สินค้าหมด'    ? 'แจ้งหมดเมื่อ:' : 'ยกเลิกเมื่อ:'
                                                 }
@@ -2453,6 +2464,11 @@
                                 </div>
                                 ${item.status === 'จัดส่งแล้ว' ? `
                                     <p class="mt-1 text-slate-600">เบิก <span class="font-semibold text-slate-700">${item.requestQty} ${esc(getProductUnitClient(item.itemName))}</span> (ความจุ ${item.storageCapacity || 0}) • ส่งจริง <span class="font-semibold text-emerald-600">${item.receiveQty} ${esc(getProductUnitClient(item.itemName))}</span></p>
+                                    ${role === 'w1' ? `<p class="text-[11px] text-brand-blue font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">hourglass_empty</span> EXP ใหม่: ${esc(item.newExpiry)}</p>` : ''}
+                                ` : ''}
+                                ${item.status === 'รอตรวจรับ' ? `
+                                    <p class="mt-1 text-slate-600">เบิก <span class="font-semibold text-slate-700">${item.requestQty} ${esc(getProductUnitClient(item.itemName))}</span> (ความจุ ${item.storageCapacity || 0}) • ส่งจริง <span class="font-semibold text-purple-600">${item.receiveQty} ${esc(getProductUnitClient(item.itemName))}</span></p>
+                                    <p class="text-[11px] text-purple-600 font-medium flex items-center gap-1 mt-0.5"><span class="material-icons-round text-[12px]">schedule</span> W2 จัดส่งแล้ว · รอหน้าร้าน (W1) ตรวจรับ</p>
                                     ${role === 'w1' ? `<p class="text-[11px] text-brand-blue font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">hourglass_empty</span> EXP ใหม่: ${esc(item.newExpiry)}</p>` : ''}
                                 ` : ''}
                                 ${item.status === 'รับสินค้าแล้ว' ? `
@@ -2481,7 +2497,7 @@
                                     </div>`;
                                 })() : ''}
                             </div>
-                            ${item.status === 'จัดส่งแล้ว' && item.receiveNote && item.receiveNote !== 'ครบ' ? `<div class="text-[10px] font-medium text-brand-orange bg-brand-orange/5 px-2 py-0.5 rounded-md border border-brand-orange/20 mt-1">จัดส่ง${esc(item.receiveNote)}</div>` : ''}
+                            ${(item.status === 'จัดส่งแล้ว' || item.status === 'รอตรวจรับ') && item.receiveNote && item.receiveNote !== 'ครบ' ? `<div class="text-[10px] font-medium text-brand-orange bg-brand-orange/5 px-2 py-0.5 rounded-md border border-brand-orange/20 mt-1">จัดส่ง${esc(item.receiveNote)}</div>` : ''}
                         </div>
                         ${item.w2Note ? `<p class="text-[11px] mt-3 text-amber-700 bg-amber-50 px-3 py-2 rounded-xl border border-amber-100/50"><span class="font-bold">โน้ต:</span> ${esc(item.w2Note)}</p>` : ''}
                     </div>
@@ -2549,7 +2565,7 @@
 
             const dispatchedItems = state.items.filter(i => {
                 const d = i.rawDate ? new Date(i.rawDate) : new Date(0);
-                return (i.status === 'จัดส่งแล้ว' || i.status === 'รับสินค้าแล้ว') && d >= startDate;
+                return (i.status === 'จัดส่งแล้ว' || i.status === 'รับสินค้าแล้ว' || i.status === 'จัดส่งไม่ครบ') && d >= startDate;
             });
 
             const TABS = [
