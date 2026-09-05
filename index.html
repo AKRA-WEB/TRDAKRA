@@ -151,7 +151,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260905.02";
+        const CURRENT_VERSION = "20260905.03";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -2322,6 +2322,12 @@
             const dir = state.historyDir === 'asc' ? 1 : -1;   // asc = เก่าไปใหม่, desc = ใหม่ไปเก่า
             if (state.historySort === 'dispatch') {
                 items = items.slice().sort((a, b) => {
+                    // หากเรียงตามวันที่จัดส่ง ให้รายการที่ รอตรวจรับ อยู่บนสุดเมื่อเรียง desc
+                    if (state.historyDir !== 'asc') {
+                        const aWait = a.status === 'รอตรวจรับ' ? 1 : 0;
+                        const bWait = b.status === 'รอตรวจรับ' ? 1 : 0;
+                        if (aWait !== bWait) return bWait - aWait;
+                    }
                     const da = a.dispatchTimestamp ? parseFormattedDate(a.dispatchTimestamp) : null;
                     const db = b.dispatchTimestamp ? parseFormattedDate(b.dispatchTimestamp) : null;
                     if (!da && !db) return 0;
@@ -2331,6 +2337,12 @@
                 });
             } else {
                 items = items.slice().sort((a, b) => {
+                    // ให้สินค้าที่รอกดรับ (รอตรวจรับ) ขึ้นมาอยู่บนสุดของประวัติเมื่อดูจากใหม่ไปเก่า
+                    if (state.historyDir !== 'asc') {
+                        const aWait = a.status === 'รอตรวจรับ' ? 1 : 0;
+                        const bWait = b.status === 'รอตรวจรับ' ? 1 : 0;
+                        if (aWait !== bWait) return bWait - aWait;
+                    }
                     const da = a.rawDate ? new Date(a.rawDate) : new Date(0);
                     const db = b.rawDate ? new Date(b.rawDate) : new Date(0);
                     return (da - db) * dir;
@@ -4484,7 +4496,16 @@
                         </button>
                     </div>`;
             } else if (state.w1Tab === 'pending') {
-                const pendingItems = state.items.filter(i => ACTIVE_W1_STATUSES.includes(i.status));
+                let pendingItems = state.items.filter(i => ACTIVE_W1_STATUSES.includes(i.status));
+                // ให้สินค้าที่รอกดรับ (รอตรวจรับ) ขึ้นมาอยู่บนสุดก่อนรายการสั่งเบิก/กำลังจัดสินค้า
+                pendingItems = pendingItems.slice().sort((a, b) => {
+                    const aIsRecheck = a.status === 'รอตรวจรับ' ? 1 : 0;
+                    const bIsRecheck = b.status === 'รอตรวจรับ' ? 1 : 0;
+                    if (aIsRecheck !== bIsRecheck) return bIsRecheck - aIsRecheck;
+                    const da = a.rawDate ? new Date(a.rawDate).getTime() : 0;
+                    const db = b.rawDate ? new Date(b.rawDate).getTime() : 0;
+                    return db - da;
+                });
                 if (pendingItems.length === 0) {
                     content = renderEmptyState('ไม่มีรายการรอรับ', 'check_circle_outline');
                 } else {

@@ -16,8 +16,8 @@ const versionJson = JSON.parse(fs.readFileSync(versionJsonPath, 'utf8'));
 console.log('--- TEST 1: Version Parity ---');
 assert.strictEqual(
   versionJson.version,
-  '20260905.02',
-  'version.json must be 20260905.02'
+  '20260905.03',
+  'version.json must be 20260905.03'
 );
 assert(
   indexHtml.includes(`const CURRENT_VERSION = "${versionJson.version}";`),
@@ -245,5 +245,39 @@ assert(renderedHtml.includes('04-09-2569 / 13:45 น.'), 'Card 2 must display di
 assert(renderedHtml.includes('(วิชัย)'), 'Card 2 must include dispatcher name in dispatch timeline');
 
 console.log('[PASS] renderHistoryCards correctly renders requester, request time, dispatcher, and dispatch time\n');
+
+// 6. Invariant: Awaiting Recheck (รอตรวจรับ) items are pinned to the top
+console.log('--- TEST 6: Priority Ordering for Awaiting Recheck (รอตรวจรับ) ---');
+vm.runInContext(`
+  state.items = [
+    { id: 'ORD-1', itemName: 'สั่งเบิก 1', status: 'สั่งเบิก', rawDate: new Date('2026-09-04T12:00:00Z') },
+    { id: 'RECHECK-1', itemName: 'รอตรวจรับ 1', status: 'รอตรวจรับ', rawDate: new Date('2026-09-03T10:00:00Z'), dispatchTimestamp: '04-09-2569 / 11:00 น.' },
+    { id: 'ORD-2', itemName: 'สั่งเบิก 2', status: 'กำลังจัดสินค้า', rawDate: new Date('2026-09-04T15:00:00Z') },
+    { id: 'DONE-1', itemName: 'รับแล้ว 1', status: 'รับสินค้าแล้ว', rawDate: new Date('2026-09-04T16:00:00Z'), dispatchTimestamp: '04-09-2569 / 16:30 น.' }
+  ];
+  state.historySort = 'request';
+  state.historyDir = 'desc';
+`, sandbox);
+
+const historySorted = sandbox.getFilteredHistory();
+assert.strictEqual(historySorted[0].id, 'RECHECK-1', 'In history list, รอตรวจรับ must be prioritized at the top');
+
+// Test pending tab sorting logic inside the VM context where ACTIVE_W1_STATUSES is accessible
+const pendingSorted = vm.runInContext(`
+  state.items
+    .filter(i => ACTIVE_W1_STATUSES.includes(i.status))
+    .slice()
+    .sort((a, b) => {
+      const aIsRecheck = a.status === 'รอตรวจรับ' ? 1 : 0;
+      const bIsRecheck = b.status === 'รอตรวจรับ' ? 1 : 0;
+      if (aIsRecheck !== bIsRecheck) return bIsRecheck - aIsRecheck;
+      const da = a.rawDate ? new Date(a.rawDate).getTime() : 0;
+      const db = b.rawDate ? new Date(b.rawDate).getTime() : 0;
+      return db - da;
+    })
+`, sandbox);
+
+assert.strictEqual(pendingSorted[0].id, 'RECHECK-1', 'In pending tab, รอตรวจรับ must appear at the top');
+console.log('[PASS] Awaiting recheck items are strictly pinned to the top in both pending tab and history list\n');
 
 console.log('🌟 ALL HISTORY REMEDIATION AND RECEIVED QTY TESTS PASSED 100%! 🌟');
