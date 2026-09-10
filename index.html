@@ -151,7 +151,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260905.04";
+        const CURRENT_VERSION = "20260910.01";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -346,6 +346,7 @@
             w2Tab: 'tasks',
             w2BatchEdits: {},
             w2PartialQty: {},
+            receiptDrafts: {}, // { requestId: { kind: 'expiry'|'manufacturing_only', date: 'YYYY-MM-DD' } }
             historySearch: '',
             historySort: 'request',
             historyDir: 'desc',
@@ -546,7 +547,12 @@
                 w2Note: item.w2Note || item.w2_note || '',
                 requestedBy: item.requestedBy || item.requested_by || '',
                 oldExpiry: formatExpiryDate(item.oldExpiry || item.old_expiry),
-                newExpiry: formatExpiryDate(item.newExpiry || item.new_expiry)
+                newExpiry: formatExpiryDate(item.newExpiry || item.new_expiry),
+                receiptDate: item.receiptDate || item.receipt_date || null,
+                receiptDateKind: item.receiptDateKind || item.receipt_date_kind || null,
+                receiptReceivedAt: item.receiptReceivedAt || item.receipt_received_at || null,
+                receiptReceivedBy: item.receiptReceivedBy || item.receipt_received_by || '',
+                revision: Number(item.revision ?? 1) || 1
             };
         }
 
@@ -1330,6 +1336,28 @@
             }
             return parseInt(item.requestQty) || 0;
         }
+
+        function renderReceiptEvidenceLine(item, role = 'w1') {
+            if (role !== 'w1' || !item || getActualReceivedQty(item) <= 0) return '';
+            if (item.receiptDateKind === 'manufacturing_only') {
+                return `<p class="text-[11px] text-purple-700 font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">factory</span> มีแต่วันผลิต — ไม่ระบุวันหมดอายุ</p>`;
+            }
+            const date = item.receiptDateKind === 'expiry' && item.receiptDate
+                ? formatReceiptDateForDisplay(item.receiptDate)
+                : item.newExpiry;
+            if (date) return `<p class="text-[11px] text-brand-blue font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">hourglass_empty</span> EXP ใหม่: ${esc(date)}</p>`;
+            return ['รับสินค้าแล้ว', 'จัดส่งไม่ครบ'].includes(item.status)
+                ? `<p class="text-[11px] text-slate-500 font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">help_outline</span> ล็อต: ยังไม่มีข้อมูลล็อต</p>`
+                : '';
+        }
+
+        function renderReceiptAuditLine(item, className = 'text-[11px] text-purple-600') {
+            if (!item) return '';
+            const by = item.receiptReceivedBy || item.recheckBy || '';
+            const at = item.receiptReceivedAt ? formatDateTime(item.receiptReceivedAt) : (item.recheckAt || '');
+            return by ? `<p class="${className} font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">verified_user</span> รับเข้าล่าสุดโดย ${esc(by)}${at ? ` · ${esc(at)}` : ''}</p>` : '';
+        }
+
         // ชื่อสินค้า (normalize) ที่มีคำขอเบิกค้างอยู่ใน state ปัจจุบัน
         function getActiveRequestNames() {
             const set = new Set();
@@ -1474,7 +1502,7 @@
             if (data && (data.status === 'error' || data.success === false)) {
                 throw new Error(data.reason || data.message || 'save_failed');
             }
-            if (Array.isArray(payload) || ['mutateInventoryDelta', 'updateProductDetails', 'updateProductDetailsBatch'].includes(payload && payload.action)) {
+            if (Array.isArray(payload) || ['mutateInventoryDelta', 'receiveInventoryItems', 'updateProductDetails', 'updateProductDetailsBatch'].includes(payload && payload.action)) {
                 state.productMovementReport = null;
                 state.productMovementDetail = null;
             }
@@ -1502,10 +1530,111 @@
             if (r.indexOf('invalid_patch') !== -1) {
                 return 'ข้อมูลที่ส่งแก้ไขไม่ถูกต้องหรือไม่ได้รับอนุญาต';
             }
+            if (r.indexOf('trd_receipt_action_required') !== -1) {
+                return 'การตรวจรับต้องใช้แบบฟอร์มนี้เท่านั้น กรุณาเปิดรายการรอตรวจรับใหม่อีกครั้ง';
+            }
+            if (r.indexOf('invalid_receipt_date') !== -1 || r.indexOf('invalid_receipt_date_kind') !== -1) {
+                return 'กรุณาระบุวันหมดอายุที่ถูกต้อง หรือเลือก “มีแต่วันผลิต”';
+            }
+            if (r.indexOf('stale_receipt_') !== -1) {
+                return 'รายการนี้ถูกตรวจรับหรือแก้ไขไปแล้ว กรุณารีเฟรชข้อมูลก่อนลองใหม่';
+            }
+            if (r.indexOf('received_qty_exceeds_sent') !== -1) {
+                return 'จำนวนรับจริงต้องไม่เกินยอดที่ W2 ส่งมา';
+            }
+            if (r.indexOf('zero_receipt_has_no_lot_evidence') !== -1) {
+                return 'รายการรับเป็นศูนย์ต้องไม่บันทึกวันหมดอายุหรือวันผลิต';
+            }
             if (r.indexOf('unsupported_operation') !== -1) {
                 return 'ไม่รองรับคำสั่งบันทึกประเภทนี้';
             }
             return 'บันทึกไม่สำเร็จ ข้อมูลอาจยังไม่ถูกบันทึก กรุณาลองใหม่อีกครั้ง';
+        }
+
+        function getReceiptDraft(itemId) {
+            const draft = (state.receiptDrafts || {})[itemId];
+            return draft ? { kind: draft.kind || 'expiry', date: draft.date || '' } : { kind: 'expiry', date: '' };
+        }
+
+        function updateReceiptDate(itemId, value) {
+            if (!state.receiptDrafts) state.receiptDrafts = {};
+            const draft = getReceiptDraft(itemId);
+            state.receiptDrafts[itemId] = { ...draft, kind: 'expiry', date: String(value || '') };
+        }
+
+        function setReceiptDateKind(itemId, kind) {
+            if (!state.receiptDrafts) state.receiptDrafts = {};
+            const draft = getReceiptDraft(itemId);
+            state.receiptDrafts[itemId] = {
+                kind: kind === 'manufacturing_only' ? 'manufacturing_only' : 'expiry',
+                date: kind === 'manufacturing_only' ? '' : draft.date
+            };
+            render();
+        }
+
+        function formatReceiptDateForDisplay(value) {
+            const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            if (!match) return value || '-';
+            return `${match[3]}-${match[2]}-${Number(match[1]) + 543}`;
+        }
+
+        function buildReceiptMutation(item) {
+            const w2Qty = parseInt(item.receiveQty != null ? item.receiveQty : item.requestQty) || 0;
+            const rawQty = (state.recheckQty || {})[item.id];
+            const qtyText = rawQty === undefined || rawQty === null ? String(w2Qty) : String(rawQty).trim();
+            if (!/^(0|[1-9]\d*)$/.test(qtyText)) return { error: 'จำนวนรับจริงไม่ถูกต้อง' };
+            const qty = Number(qtyText);
+            if (!Number.isSafeInteger(qty) || qty > w2Qty) return { error: `จำนวนรับจริงต้องไม่เกิน ${w2Qty} ${getProductUnitClient(item.itemName)}` };
+            const draft = getReceiptDraft(item.id);
+            if (qty > 0 && draft.kind === 'expiry' && !/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) {
+                return { error: 'กรุณาระบุวันหมดอายุที่ใกล้ที่สุด' };
+            }
+            if (qty > 0 && draft.kind !== 'expiry' && draft.kind !== 'manufacturing_only') {
+                return { error: 'กรุณาเลือกประเภทวันของล็อตสินค้า' };
+            }
+            return {
+                item: {
+                    id: item.id,
+                    expectedRevision: Number(item.revision) || 1,
+                    receivedQty: qty,
+                    receiptDate: qty > 0 && draft.kind === 'expiry' ? draft.date : null,
+                    receiptDateKind: qty > 0 ? draft.kind : null
+                },
+                qty
+            };
+        }
+
+        async function saveReceiptItems(items, options = {}) {
+            if (await AppVersionGuard.blockIfStale()) return false;
+            if (!APPS_SCRIPT_URL) return false;
+            showLoading('กำลังบันทึกผลตรวจรับ...');
+            try {
+                return await postMutation({
+                    action: 'receiveInventoryItems',
+                    clientMutationId: options.clientMutationId || `trd-receipt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    items
+                });
+            } catch (error) {
+                console.error('Error saving receipt:', error);
+                alert(saveErrorMessage(error));
+                return false;
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function applyReceiptResult(result) {
+            const returned = Array.isArray(result && result.items) ? result.items.map(mapItemData) : [];
+            const byId = new Map(returned.map(item => [String(item.id), item]));
+            const receiptFields = ['status', 'recheckQty', 'recheckAt', 'recheckBy', 'recheckNote', 'receiptDate', 'receiptDateKind', 'receiptReceivedAt', 'receiptReceivedBy', 'newExpiry', 'revision'];
+            state.items = state.items.map(item => {
+                const update = byId.get(String(item.id));
+                if (!update) return item;
+                return receiptFields.reduce((merged, field) => {
+                    merged[field] = update[field];
+                    return merged;
+                }, { ...item });
+            });
         }
 
         // คืน object response เมื่อสำเร็จ, คืน false เมื่อล้มเหลว
@@ -2075,33 +2204,27 @@
             const item = state.items.find(i => i.id === itemId);
             if (!item) return;
             const w2Qty   = parseInt(item.receiveQty != null ? item.receiveQty : item.requestQty) || 0;
-            const requestedQty = parseInt(item.requestQty) || 0;
             let recheckVal = (state.recheckQty || {})[itemId];
             if (recheckVal === undefined || recheckVal === null || recheckVal === '') {
                 recheckVal = w2Qty;
             }
-            const qty = parseInt(recheckVal);
-            if (isNaN(qty) || qty < 0) { alert('จำนวนไม่ถูกต้อง'); return; }
+            if (!state.recheckQty) state.recheckQty = {};
+            state.recheckQty[itemId] = recheckVal;
+            const mutation = buildReceiptMutation(item);
+            if (mutation.error) { alert(mutation.error); return; }
+            const qty = mutation.qty;
             const unit    = getProductUnitClient(item.itemName);
-            if (qty > w2Qty) {
-                alert(`จำนวนรับจริงมากกว่ายอดที่ W2 ส่งมา (${w2Qty} ${unit}) กรุณาตรวจสอบอีกครั้ง`);
-                return;
-            }
-            const isFull  = qty >= requestedQty;
-            const newStatus  = isFull ? 'รับสินค้าแล้ว' : 'จัดส่งไม่ครบ';
-            const recheckNote = isFull ? 'ครบ' : `รับจริง ${qty}/${requestedQty} ขาด ${requestedQty - qty}${w2Qty !== requestedQty ? ` (W2 ส่ง ${w2Qty})` : ''}`;
-            const now    = formatDateTime(new Date().toISOString());
-            const patch  = { status: newStatus, recheckQty: qty, recheckAt: now, recheckBy: currentUser || '', recheckNote };
-            if (!confirm(`ยืนยันตรวจรับ "${item.itemName}"\nรับจริง ${qty} ${unit} → ${newStatus}`)) return;
-            const res = await saveInventoryDelta(
-                [{ op: 'updateById', id: itemId, patch }],
-                { perfName: 'confirmRecheck' }
-            );
+            const evidence = mutation.item.receiptDateKind === 'manufacturing_only'
+                ? 'มีแต่วันผลิต'
+                : `EXP ${formatReceiptDateForDisplay(mutation.item.receiptDate)}`;
+            if (!confirm(`ยืนยันตรวจรับ "${item.itemName}"\nรับจริง ${qty} ${unit}\n${evidence}`)) return;
+            const res = await saveReceiptItems([mutation.item], { perfName: 'confirmRecheck' });
             if (!res) { await fetchInitialData(true); return; }
-            state.items = state.items.map(i => i.id === itemId ? { ...i, ...patch } : i);
+            applyReceiptResult(res);
             if (state.recheckQty) delete state.recheckQty[itemId];
+            if (state.receiptDrafts) delete state.receiptDrafts[itemId];
             render();
-            sendAppLog('ตรวจรับสินค้า (TRD)', `${item.itemName} — ${qty} ${unit} (${newStatus})`);
+            sendAppLog('ตรวจรับสินค้า (TRD)', `${item.itemName} — ${qty} ${unit} (${evidence})`);
         }
 
         async function confirmRecheckAllItems() {
@@ -2110,36 +2233,25 @@
                 alert('ไม่มีรายการที่รอตรวจรับ');
                 return;
             }
-            if (!confirm(`ต้องการยืนยันตรวจรับสินค้าทั้งหมด ${recheckItems.length} รายการ ตามยอดที่คลังส่งมาใช่หรือไม่?`)) {
-                return;
-            }
-            const now = formatDateTime(new Date().toISOString());
             const mutations = [];
-            const updatedPatches = {};
-
             for (const item of recheckItems) {
-                const w2Qty = parseInt(item.receiveQty != null ? item.receiveQty : item.requestQty) || 0;
-                const requestedQty = parseInt(item.requestQty) || 0;
-                let userVal = (state.recheckQty || {})[item.id];
-                let qty = (userVal !== undefined && userVal !== null && userVal !== '') ? parseInt(userVal) : w2Qty;
-                if (isNaN(qty) || qty < 0) qty = w2Qty;
-                if (qty > w2Qty) qty = w2Qty;
-
-                const isFull = qty >= requestedQty;
-                const newStatus = isFull ? 'รับสินค้าแล้ว' : 'จัดส่งไม่ครบ';
-                const recheckNote = isFull ? 'ครบ' : `รับจริง ${qty}/${requestedQty} ขาด ${requestedQty - qty}${w2Qty !== requestedQty ? ` (W2 ส่ง ${w2Qty})` : ''}`;
-                const patch = { status: newStatus, recheckQty: qty, recheckAt: now, recheckBy: currentUser || '', recheckNote };
-                mutations.push({ op: 'updateById', id: item.id, patch });
-                updatedPatches[item.id] = patch;
+                const mutation = buildReceiptMutation(item);
+                if (mutation.error) {
+                    alert(`${item.itemName}: ${mutation.error}`);
+                    return;
+                }
+                mutations.push(mutation.item);
             }
+            if (!confirm(`ต้องการยืนยันตรวจรับสินค้าทั้งหมด ${recheckItems.length} รายการตามข้อมูลล็อตที่ระบุใช่หรือไม่?`)) return;
 
-            const res = await saveInventoryDelta(mutations, { perfName: 'confirmRecheckAll' });
+            const res = await saveReceiptItems(mutations, { perfName: 'confirmRecheckAll' });
             if (!res) {
                 await fetchInitialData(true);
                 return;
             }
-            state.items = state.items.map(i => updatedPatches[i.id] ? { ...i, ...updatedPatches[i.id] } : i);
+            applyReceiptResult(res);
             state.recheckQty = {};
+            state.receiptDrafts = {};
             render();
             sendAppLog('ตรวจรับสินค้าทั้งหมด (TRD)', `ยืนยันตรวจรับสำเร็จ ${recheckItems.length} รายการ`);
         }
@@ -2527,17 +2639,17 @@
                                 </div>
                                 ${item.status === 'จัดส่งแล้ว' ? `
                                     <p class="mt-1 text-slate-600">เบิก <span class="font-semibold text-slate-700">${item.requestQty} ${esc(getProductUnitClient(item.itemName))}</span> (ความจุ ${item.storageCapacity || 0}) • ส่งจริง <span class="font-semibold text-emerald-600">${item.receiveQty} ${esc(getProductUnitClient(item.itemName))}</span></p>
-                                    ${role === 'w1' ? `<p class="text-[11px] text-brand-blue font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">hourglass_empty</span> EXP ใหม่: ${esc(item.newExpiry)}</p>` : ''}
+                                    ${renderReceiptEvidenceLine(item, role)}
                                 ` : ''}
                                 ${item.status === 'รอตรวจรับ' ? `
                                     <p class="mt-1 text-slate-600">เบิก <span class="font-semibold text-slate-700">${item.requestQty} ${esc(getProductUnitClient(item.itemName))}</span> (ความจุ ${item.storageCapacity || 0}) • ส่งจริง <span class="font-semibold text-purple-600">${item.receiveQty} ${esc(getProductUnitClient(item.itemName))}</span></p>
                                     <p class="text-[11px] text-purple-600 font-medium flex items-center gap-1 mt-0.5"><span class="material-icons-round text-[12px]">schedule</span> W2 จัดส่งแล้ว · รอหน้าร้าน (W1) ตรวจรับ</p>
-                                    ${role === 'w1' ? `<p class="text-[11px] text-brand-blue font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">hourglass_empty</span> EXP ใหม่: ${esc(item.newExpiry)}</p>` : ''}
+                                    ${renderReceiptEvidenceLine(item, role)}
                                 ` : ''}
                                 ${item.status === 'รับสินค้าแล้ว' ? `
                                     <p class="mt-1 text-slate-600">เบิก <span class="font-semibold text-slate-700">${item.requestQty} ${esc(getProductUnitClient(item.itemName))}</span> (ความจุ ${item.storageCapacity || 0}) • รับจริง <span class="font-semibold text-emerald-600">${getActualReceivedQty(item)} ${esc(getProductUnitClient(item.itemName))}</span></p>
-                                    ${item.recheckBy ? `<p class="text-[11px] text-purple-600 font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">verified_user</span> ตรวจรับโดย ${esc(item.recheckBy)}${item.recheckAt ? ' · ' + item.recheckAt : ''}</p>` : ''}
-                                    ${role === 'w1' ? `<p class="text-[11px] text-brand-blue font-medium flex items-center gap-1"><span class="material-icons-round text-[12px]">hourglass_empty</span> EXP ใหม่: ${esc(item.newExpiry)}</p>` : ''}
+                                    ${renderReceiptAuditLine(item)}
+                                    ${renderReceiptEvidenceLine(item, role)}
                                 ` : ''}
                                 ${item.status === 'จัดส่งไม่ครบ' ? (() => {
                                     const received = getActualReceivedQty(item);
@@ -2556,7 +2668,8 @@
                                             <span class="font-bold text-rose-600">ขาด</span>
                                             <span class="font-black text-rose-600">${shortage} ${esc(getProductUnitClient(item.itemName))}</span>
                                         </div>
-                                        ${item.recheckBy ? `<p class="text-[10px] text-purple-600 mt-1.5 font-medium">ตรวจรับโดย ${esc(item.recheckBy)}${item.recheckAt ? ' · ' + item.recheckAt : ''}</p>` : ''}
+                                        ${renderReceiptAuditLine(item, 'text-[10px] text-purple-600 mt-1.5')}
+                                        ${renderReceiptEvidenceLine(item, role)}
                                     </div>`;
                                 })() : ''}
                             </div>
@@ -3532,7 +3645,12 @@
                         actualQty: recQty,
                         shortageQty: Math.max(0, reqQty - recQty),
                         requestAt: i.rawDate ? (new Date(i.rawDate).toISOString()) : (i.timestamp || ''),
-                        dispatchAt: i.dispatchTimestamp ? (parseCustomDate(i.dispatchTimestamp).toISOString()) : null
+                        dispatchAt: i.dispatchTimestamp ? (parseCustomDate(i.dispatchTimestamp).toISOString()) : null,
+                        receiptDate: i.receiptDate || null,
+                        receiptDateKind: i.receiptDateKind || null,
+                        receiptReceivedAt: i.receiptReceivedAt || null,
+                        receiptReceivedBy: i.receiptReceivedBy || i.recheckBy || '',
+                        newExpiry: i.newExpiry || ''
                     };
                 });
                 state.productMovementDetail = {
@@ -3550,6 +3668,25 @@
                 state.productMovementDetailLoading = false;
                 render();
             }
+        }
+
+        function getLatestReceiptRecord(records) {
+            return (records || []).filter(record => Number(record.actualQty) > 0 && record.receiptReceivedAt)
+                .sort((a, b) => new Date(b.receiptReceivedAt).getTime() - new Date(a.receiptReceivedAt).getTime())[0] || null;
+        }
+
+        function renderMovementReceiptEvidence(record) {
+            if (!record || Number(record.actualQty) <= 0) return '';
+            const evidence = record.receiptDateKind === 'manufacturing_only'
+                ? 'มีแต่วันผลิต — ไม่ระบุวันหมดอายุ'
+                : record.receiptDateKind === 'expiry' && record.receiptDate
+                    ? `EXP ใหม่: ${formatReceiptDateForDisplay(record.receiptDate)}`
+                    : record.newExpiry ? `EXP ใหม่: ${record.newExpiry}` : 'ล็อต: ยังไม่มีข้อมูลล็อต';
+            if (!evidence) return '';
+            const audit = record.receiptReceivedBy
+                ? ` · รับเข้าล่าสุดโดย ${record.receiptReceivedBy}${record.receiptReceivedAt ? ` · ${formatDateTime(record.receiptReceivedAt)}` : ''}`
+                : '';
+            return `<span class="sm:col-span-2 text-purple-700 font-semibold">${esc(evidence)}${esc(audit)}</span>`;
         }
 
         function quickOrderFromAnalytics(productName, unit = 'ชิ้น') {
@@ -4003,6 +4140,7 @@
             const status = movementStateMeta(product);
             const detail = state.productMovementDetail;
             const windows = detail && detail.windows ? detail.windows : {};
+            const latestReceipt = getLatestReceiptRecord(detail && detail.records);
             const renderWindow = (days) => {
                 const windowData = windows[String(days)];
                 if (!windowData) return `<div class="bg-slate-50 rounded-2xl p-4 text-xs text-slate-400">กำลังโหลดข้อมูล ${days} วัน...</div>`;
@@ -4030,12 +4168,13 @@
                     <div class="bg-slate-100 rounded-2xl p-3"><p class="text-[10px] text-slate-500">Fulfillment / Lead time</p><p class="text-lg font-black text-slate-700">${movementMetric(product.fulfillmentRate, '%')}</p><p class="text-[10px] text-slate-500">${movementMetric(product.medianLeadTimeHours, ' ชม.')}</p></div>
                 </section>
                 <section class="grid grid-cols-1 sm:grid-cols-2 gap-3">${renderWindow(3)}${renderWindow(7)}</section>
+                ${latestReceipt ? `<section class="bg-purple-50 border border-purple-200 rounded-2xl p-4"><p class="text-[10px] font-bold text-purple-700 uppercase tracking-wider">รับเข้าล่าสุด</p><p class="text-sm font-black text-purple-900 mt-1">${esc(latestReceipt.receiptDateKind === 'manufacturing_only' ? 'มีแต่วันผลิต — ไม่ระบุวันหมดอายุ' : latestReceipt.receiptDate ? `EXP ใหม่: ${formatReceiptDateForDisplay(latestReceipt.receiptDate)}` : latestReceipt.newExpiry || '-')}</p><p class="text-[10px] text-purple-700 mt-1">${esc(latestReceipt.receiptReceivedBy || '-')} · ${esc(latestReceipt.receiptReceivedAt ? formatDateTime(latestReceipt.receiptReceivedAt) : '-')}</p></section>` : ''}
                 <section class="bg-white rounded-2xl border border-slate-100 p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
                     <div><p class="text-[10px] text-slate-400">เฉลี่ย / รอบ</p><p class="text-sm font-black">${movementMetric(product.averageFulfilledQty)}</p></div><div><p class="text-[10px] text-slate-400">มัธยฐาน / สูงสุด</p><p class="text-sm font-black">${movementMetric(product.medianFulfilledQty)} / ${movementMetric(product.maxFulfilledQty)}</p></div><div><p class="text-[10px] text-slate-400">ค้าง / ส่งไม่ครบ / หมด / ยกเลิก</p><p class="text-sm font-black">${product.pendingRounds} / ${product.partialCount} / ${product.stockoutCount} / ${product.cancelledCount || 0}</p></div><div><p class="text-[10px] text-slate-400">ขาดจากส่งไม่ครบ</p><p class="text-sm font-black">${product.shortageQty.toLocaleString()} ${esc(product.unit)}</p></div>
                 </section>
                 ${product.nameVariants && product.nameVariants.length ? `<div class="bg-violet-50 border border-violet-200 text-violet-700 rounded-xl p-3 text-xs"><b>คำเตือนคุณภาพข้อมูล:</b> พบชื่อใกล้เคียง ${product.nameVariants.map(esc).join(', ')} ระบบยังไม่รวมชื่อให้อัตโนมัติ</div>` : ''}
                 <section><div class="flex items-center justify-between mb-3"><h3 class="text-sm font-black text-brand-blue">ประวัติรายรอบล่าสุด</h3>${detail ? `<span class="text-[10px] text-slate-400">แสดง ${detail.records.length} จาก ${detail.totalCount} รายการ</span>` : ''}</div>
-                    ${state.productMovementDetailLoading ? '<div class="py-10 text-center text-sm text-slate-400">กำลังโหลดประวัติ...</div>' : state.productMovementDetailError ? `<div class="bg-rose-50 rounded-xl p-3 text-xs text-rose-700">${esc(state.productMovementDetailError)} <button onclick="fetchProductMovementDetail(state.productSelected)" class="underline font-bold">ลองใหม่</button></div>` : detail && detail.records.length ? `<div class="bg-white rounded-2xl border border-slate-100 divide-y divide-slate-100">${detail.records.map(record => `<div class="p-4"><div class="flex justify-between gap-2"><span class="text-[10px] font-mono text-brand-blue">${esc(record.id || '-')}</span>${getStatusBadge(record.status)}</div><div class="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-2 text-[10px] text-slate-500"><span>ขอเบิก: ${movementDateLabel(record.requestAt, true)}</span><span>${record.dispatchAt ? `จัดส่ง: ${movementDateLabel(record.dispatchAt, true)}${record.legacyDateFallback ? ' (ใช้วันที่ขอเบิกเดิม)' : ''}` : record.exceptionAt ? `เหตุการณ์: ${movementDateLabel(record.exceptionAt, true)}` : 'จัดส่ง: -'}</span><span>ผู้ขอ: ${esc(record.requestedBy || '-')}</span><span>ขอ ${record.requestQty.toLocaleString()} · ส่งจริง ${record.actualQty.toLocaleString()} · ขาด ${record.shortageQty.toLocaleString()} ${esc(product.unit)}</span></div></div>`).join('')}</div>` : renderEmptyState('ไม่มีประวัติของสินค้านี้', 'inventory_2')}
+                    ${state.productMovementDetailLoading ? '<div class="py-10 text-center text-sm text-slate-400">กำลังโหลดประวัติ...</div>' : state.productMovementDetailError ? `<div class="bg-rose-50 rounded-xl p-3 text-xs text-rose-700">${esc(state.productMovementDetailError)} <button onclick="fetchProductMovementDetail(state.productSelected)" class="underline font-bold">ลองใหม่</button></div>` : detail && detail.records.length ? `<div class="bg-white rounded-2xl border border-slate-100 divide-y divide-slate-100">${detail.records.map(record => `<div class="p-4"><div class="flex justify-between gap-2"><span class="text-[10px] font-mono text-brand-blue">${esc(record.id || '-')}</span>${getStatusBadge(record.status)}</div><div class="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-2 text-[10px] text-slate-500"><span>ขอเบิก: ${movementDateLabel(record.requestAt, true)}</span><span>${record.dispatchAt ? `จัดส่ง: ${movementDateLabel(record.dispatchAt, true)}${record.legacyDateFallback ? ' (ใช้วันที่ขอเบิกเดิม)' : ''}` : record.exceptionAt ? `เหตุการณ์: ${movementDateLabel(record.exceptionAt, true)}` : 'จัดส่ง: -'}</span><span>ผู้ขอ: ${esc(record.requestedBy || '-')}</span><span>ขอ ${record.requestQty.toLocaleString()} · ส่งจริง ${record.actualQty.toLocaleString()} · ขาด ${record.shortageQty.toLocaleString()} ${esc(product.unit)}</span>${renderMovementReceiptEvidence(record)}</div></div>`).join('')}</div>` : renderEmptyState('ไม่มีประวัติของสินค้านี้', 'inventory_2')}
                 </section>`;
         }
 
@@ -4558,11 +4697,11 @@
                                 </div>
                                 <div>
                                     <p class="font-bold text-sm leading-tight">มีสินค้ามาส่ง ${awaitingRecheckCount} รายการ</p>
-                                    <p class="text-[11px] text-white/80">ตรวจนับแล้วกดรับพร้อมกันได้ทันที</p>
+                            <p class="text-[11px] text-white/80">ตรวจนับและระบุวันหมดอายุหรือมีแต่วันผลิตให้ครบก่อนยืนยัน</p>
                                 </div>
                             </div>
                             <button onclick="confirmRecheckAllItems()" class="bg-white text-purple-700 font-bold px-3.5 py-2 rounded-xl text-xs shadow hover:bg-purple-50 active:scale-95 transition-all flex items-center gap-1 flex-shrink-0">
-                                <span class="material-icons-round text-sm">done_all</span> รับครบทั้งหมด
+                                <span class="material-icons-round text-sm">done_all</span> ตรวจรับทั้งหมด
                             </button>
                         </div>
                     ` : '';
@@ -4594,6 +4733,8 @@
                         if (item.status === 'รอตรวจรับ') {
                             const w2Qty     = parseInt(item.receiveQty != null ? item.receiveQty : item.requestQty) || 0;
                             const curRecheck = (state.recheckQty || {})[item.id] !== undefined ? state.recheckQty[item.id] : w2Qty;
+                            const receiptDraft = getReceiptDraft(item.id);
+                            const receiptIsMfgOnly = receiptDraft.kind === 'manufacturing_only';
                             return `
                         <div class="bg-white p-5 rounded-[1.5rem] shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-purple-100 transition-all">
                             ${itemHeader}
@@ -4623,6 +4764,23 @@
                                 <span class="text-xs font-bold text-brand-blue flex-shrink-0">${esc(unit)}</span>
                             </div>
                             <p id="recheck-info-${enc}" class="text-[10px] font-bold text-center mb-3 text-transparent">—</p>
+                            <div class="bg-slate-50 border border-slate-200 rounded-2xl p-3 mb-3">
+                                <div class="flex items-center justify-between gap-2 mb-2">
+                                    <p class="text-[10px] font-bold text-slate-600">ข้อมูลล็อตที่รับจริง</p>
+                                    <span class="text-[10px] text-slate-400">${curRecheck > 0 ? 'จำเป็นเมื่อรับมากกว่า 0' : 'ไม่ต้องระบุเมื่อรับ 0'}</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <button type="button" onclick="setReceiptDateKind(decodeURIComponent('${enc}'), 'expiry')" aria-pressed="${!receiptIsMfgOnly}" class="min-h-11 rounded-xl border text-xs font-bold transition-colors ${!receiptIsMfgOnly ? 'bg-brand-blue text-white border-brand-blue' : 'bg-white text-slate-600 border-slate-200'}">ระบุวันหมดอายุ</button>
+                                    <button type="button" onclick="setReceiptDateKind(decodeURIComponent('${enc}'), 'manufacturing_only')" aria-pressed="${receiptIsMfgOnly}" class="min-h-11 rounded-xl border text-xs font-bold transition-colors ${receiptIsMfgOnly ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-slate-600 border-slate-200'}">มีแต่วันผลิต</button>
+                                </div>
+                                ${receiptIsMfgOnly ? `<p class="text-[10px] text-purple-700 mt-2 font-medium">บันทึกเป็นล็อตที่มีแต่วันผลิต จึงไม่ระบุวันหมดอายุ</p>` : `
+                                    <label class="block mt-3">
+                                        <span class="block text-[10px] font-bold text-slate-600 mb-1">วันหมดอายุที่ใกล้ที่สุด</span>
+                                        <input type="date" value="${esc(receiptDraft.date)}" oninput="updateReceiptDate(decodeURIComponent('${enc}'), this.value)" aria-label="วันหมดอายุที่ใกล้ที่สุดของ ${esc(item.itemName)}" class="w-full min-h-11 px-3 rounded-xl bg-white border border-slate-200 text-sm text-slate-700 focus:border-brand-blue focus:outline-none">
+                                        <span class="block text-[10px] text-slate-400 mt-1">หากมีหลายล็อต ให้ระบุวันหมดอายุที่ใกล้ที่สุด</span>
+                                    </label>
+                                `}
+                            </div>
                             <button onclick="confirmRecheckItem(decodeURIComponent('${enc}'))"
                                     class="w-full bg-brand-blue text-white font-bold py-3 rounded-2xl text-sm shadow-md shadow-brand-blue/20 active:scale-[0.98] transition-all">
                                 ✓ ยืนยันตรวจรับ

@@ -16,8 +16,8 @@ const versionJson = JSON.parse(fs.readFileSync(versionJsonPath, 'utf8'));
 console.log('--- TEST 1: Version Parity ---');
 assert.strictEqual(
   versionJson.version,
-  '20260905.04',
-  'version.json must be 20260905.04'
+  '20260910.01',
+  'version.json must be 20260910.01'
 );
 assert(
   indexHtml.includes(`const CURRENT_VERSION = "${versionJson.version}";`),
@@ -296,7 +296,7 @@ const pendingHtml = vm.runInContext(`
 `, sandbox);
 
 assert(pendingHtml.includes('มีสินค้ามาส่ง 2 รายการ'), 'Pending tab must show batch recheck banner with count 2');
-assert(pendingHtml.includes('รับครบทั้งหมด'), 'Pending tab must have รับครบทั้งหมด button');
+assert(pendingHtml.includes('ตรวจรับทั้งหมด'), 'Pending tab must have ตรวจรับทั้งหมด button');
 assert(pendingHtml.includes('confirmRecheckAllItems()'), 'Pending tab must call confirmRecheckAllItems()');
 assert(pendingHtml.includes('placeholder="10"'), 'RC-1 input must placeholder="10" (w2Qty)');
 assert(pendingHtml.includes('placeholder="15"'), 'RC-2 input must placeholder="15" (w2Qty)');
@@ -304,4 +304,3 @@ assert(pendingHtml.includes('placeholder="15"'), 'RC-2 input must placeholder="1
 console.log('[PASS] UX batch recheck banner and default w2Qty quantity verified\n');
 
 console.log('🌟 ALL HISTORY REMEDIATION AND RECEIVED QTY TESTS PASSED 100%! 🌟');
-
