@@ -151,7 +151,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260910.01";
+        const CURRENT_VERSION = "20260910.02";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -1572,6 +1572,49 @@
             render();
         }
 
+        function normalizeReceiptDateInput(value) {
+            const thaiDigits = '๐๑๒๓๔๕๖๗๘๙';
+            return String(value == null ? '' : value)
+                .trim()
+                .replace(/[๐-๙]/g, digit => String(thaiDigits.indexOf(digit)))
+                .replace(/[‐‑‒–—−]/g, '-')
+                .replace(/／/g, '/')
+                .replace(/\s+/g, ' ');
+        }
+
+        function parseReceiptDateInput(value) {
+            let input = normalizeReceiptDateInput(value);
+            if (!input) return null;
+            const hasBe = /พ\s*\.?\s*ศ\s*\.?|\bพศ\b|\bb\s*\.?\s*e\s*\.?/i.test(input);
+            const hasCe = /ค\s*\.?\s*ศ\s*\.?|\bคศ\b|\bc\s*\.?\s*e\s*\.?/i.test(input);
+            if (hasBe && hasCe) return null;
+            input = input
+                .replace(/พ\s*\.?\s*ศ\s*\.?|\bพศ\b|\bb\s*\.?\s*e\s*\.?/i, '')
+                .replace(/ค\s*\.?\s*ศ\s*\.?|\bคศ\b|\bc\s*\.?\s*e\s*\.?/i, '')
+                .trim();
+            const parts = input.split(/[\s/.-]+/).filter(Boolean);
+            if (parts.length !== 3 || parts.some(part => !/^\d{1,4}$/.test(part))) return null;
+
+            const yearFirst = parts[0].length === 4;
+            const dayText = yearFirst ? parts[2] : parts[0];
+            const monthText = yearFirst ? parts[1] : parts[1];
+            const yearText = yearFirst ? parts[0] : parts[2];
+            const day = Number(dayText);
+            const month = Number(monthText);
+            let year = Number(yearText);
+            if (yearText.length <= 2) {
+                year = hasBe ? 2500 + year : hasCe ? 2000 + year : year >= 31 ? 2500 + year : 2000 + year;
+            }
+            if (hasBe || (!hasCe && year >= 2400)) {
+                year -= 543;
+            }
+            if (year < 1900 || year > 2999) return null;
+
+            const date = new Date(Date.UTC(year, month - 1, day));
+            if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+            return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        }
+
         function formatReceiptDateForDisplay(value) {
             const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
             if (!match) return value || '-';
@@ -1586,8 +1629,10 @@
             const qty = Number(qtyText);
             if (!Number.isSafeInteger(qty) || qty > w2Qty) return { error: `จำนวนรับจริงต้องไม่เกิน ${w2Qty} ${getProductUnitClient(item.itemName)}` };
             const draft = getReceiptDraft(item.id);
-            if (qty > 0 && draft.kind === 'expiry' && !/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) {
-                return { error: 'กรุณาระบุวันหมดอายุที่ใกล้ที่สุด' };
+            const rawDate = String(draft.date || '').trim();
+            const parsedDate = qty > 0 && draft.kind === 'expiry' ? parseReceiptDateInput(rawDate) : null;
+            if (qty > 0 && draft.kind === 'expiry' && !parsedDate) {
+                return { error: rawDate ? 'รูปแบบวันหมดอายุไม่ถูกต้อง เช่น 15/09/69 หรือ 15/9/27' : 'กรุณาระบุวันหมดอายุที่ใกล้ที่สุด' };
             }
             if (qty > 0 && draft.kind !== 'expiry' && draft.kind !== 'manufacturing_only') {
                 return { error: 'กรุณาเลือกประเภทวันของล็อตสินค้า' };
@@ -1597,7 +1642,7 @@
                     id: item.id,
                     expectedRevision: Number(item.revision) || 1,
                     receivedQty: qty,
-                    receiptDate: qty > 0 && draft.kind === 'expiry' ? draft.date : null,
+                    receiptDate: parsedDate,
                     receiptDateKind: qty > 0 ? draft.kind : null
                 },
                 qty
@@ -4776,8 +4821,8 @@
                                 ${receiptIsMfgOnly ? `<p class="text-[10px] text-purple-700 mt-2 font-medium">บันทึกเป็นล็อตที่มีแต่วันผลิต จึงไม่ระบุวันหมดอายุ</p>` : `
                                     <label class="block mt-3">
                                         <span class="block text-[10px] font-bold text-slate-600 mb-1">วันหมดอายุที่ใกล้ที่สุด</span>
-                                        <input type="date" value="${esc(receiptDraft.date)}" oninput="updateReceiptDate(decodeURIComponent('${enc}'), this.value)" aria-label="วันหมดอายุที่ใกล้ที่สุดของ ${esc(item.itemName)}" class="w-full min-h-11 px-3 rounded-xl bg-white border border-slate-200 text-sm text-slate-700 focus:border-brand-blue focus:outline-none">
-                                        <span class="block text-[10px] text-slate-400 mt-1">หากมีหลายล็อต ให้ระบุวันหมดอายุที่ใกล้ที่สุด</span>
+                                        <input type="text" value="${esc(receiptDraft.date)}" inputmode="numeric" autocomplete="off" placeholder="15/09/69 หรือ 15/9/27" oninput="updateReceiptDate(decodeURIComponent('${enc}'), this.value)" aria-label="วันหมดอายุที่ใกล้ที่สุดของ ${esc(item.itemName)}" class="w-full min-h-11 px-3 rounded-xl bg-white border border-slate-200 text-sm text-slate-700 focus:border-brand-blue focus:outline-none">
+                                        <span class="block text-[10px] text-slate-400 mt-1">หากมีหลายล็อต ให้ระบุวันหมดอายุที่ใกล้ที่สุด เช่น 15/09/69 = พ.ศ. 2569 · 15/9/27 = ค.ศ. 2027 · ใส่ พ.ศ./ค.ศ. เพื่อระบุชัดเจน</span>
                                     </label>
                                 `}
                             </div>

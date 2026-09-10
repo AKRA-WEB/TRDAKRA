@@ -64,7 +64,7 @@ const sandbox = {
   alert(message) { alerts.push(String(message)); },
   fetch: async (url, options = {}) => {
     const target = String(url);
-    if (target.includes('version.json')) return { ok: true, json: async () => ({ version: '20260910.01' }) };
+    if (target.includes('version.json')) return { ok: true, json: async () => ({ version: '20260910.02' }) };
     const payload = JSON.parse(options.body || '{}');
     apiCalls.push(payload);
     if (payload.action === 'receiveInventoryItems') {
@@ -108,14 +108,31 @@ vm.runInContext(`
 `, sandbox);
 
 const expItem = vm.runInContext('state.items[0]', sandbox);
+assert.equal(sandbox.parseReceiptDateInput('15/09/69'), '2026-09-15');
+assert.equal(sandbox.parseReceiptDateInput('15/9/27'), '2027-09-15');
+assert.equal(sandbox.parseReceiptDateInput('15/09/2569'), '2026-09-15');
+assert.equal(sandbox.parseReceiptDateInput('15-9-2027'), '2027-09-15');
+assert.equal(sandbox.parseReceiptDateInput('2027-09-15'), '2027-09-15');
+assert.equal(sandbox.parseReceiptDateInput('15/09/69 พ.ศ.'), '2026-09-15');
+assert.equal(sandbox.parseReceiptDateInput('15/9/27 ค.ศ.'), '2027-09-15');
+assert.equal(sandbox.parseReceiptDateInput('31/02/69'), null);
+
 let mutation = sandbox.buildReceiptMutation(expItem);
 assert.equal(mutation.error, 'กรุณาระบุวันหมดอายุที่ใกล้ที่สุด', 'positive receipt must require an expiry date by default');
 
-sandbox.updateReceiptDate('RC-EXP', '2027-02-03');
+sandbox.updateReceiptDate('RC-EXP', '15/09/69');
 mutation = sandbox.buildReceiptMutation(expItem);
 assert.equal(mutation.item.receiptDateKind, 'expiry');
-assert.equal(mutation.item.receiptDate, '2027-02-03');
+assert.equal(mutation.item.receiptDate, '2026-09-15');
 assert.equal(mutation.item.expectedRevision, 1);
+
+sandbox.updateReceiptDate('RC-EXP', '15/9/27');
+mutation = sandbox.buildReceiptMutation(expItem);
+assert.equal(mutation.item.receiptDate, '2027-09-15');
+
+sandbox.updateReceiptDate('RC-EXP', '31/02/69');
+mutation = sandbox.buildReceiptMutation(expItem);
+assert.equal(mutation.error, 'รูปแบบวันหมดอายุไม่ถูกต้อง เช่น 15/09/69 หรือ 15/9/27');
 
 sandbox.setReceiptDateKind('RC-EXP', 'manufacturing_only');
 assert.equal(vm.runInContext("state.receiptDrafts['RC-EXP'].date", sandbox), '', 'switching to manufacturing-only must clear a stale date');
