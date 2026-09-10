@@ -13,6 +13,8 @@ new vm.Script(script, { filename: 'trdakra-receipt-runtime.js' });
 const storage = {};
 const elements = new Map();
 const alerts = [];
+const confirmations = [];
+const confirmResults = [];
 const apiCalls = [];
 const makeElement = () => ({
   style: {}, innerText: '', innerHTML: '', className: '',
@@ -60,11 +62,14 @@ const sandbox = {
   location: { href: 'http://localhost', search: '' },
   performance: { now: () => Date.now() },
   setInterval() { return 0; },
-  confirm: () => true,
+  confirm(message) {
+    confirmations.push(String(message));
+    return confirmResults.length > 0 ? confirmResults.shift() : true;
+  },
   alert(message) { alerts.push(String(message)); },
   fetch: async (url, options = {}) => {
     const target = String(url);
-    if (target.includes('version.json')) return { ok: true, json: async () => ({ version: '20260910.02' }) };
+    if (target.includes('version.json')) return { ok: true, json: async () => ({ version: '20260910.03' }) };
     const payload = JSON.parse(options.body || '{}');
     apiCalls.push(payload);
     if (payload.action === 'receiveInventoryItems') {
@@ -118,7 +123,10 @@ assert.equal(sandbox.parseReceiptDateInput('15/9/27 ค.ศ.'), '2027-09-15');
 assert.equal(sandbox.parseReceiptDateInput('31/02/69'), null);
 
 let mutation = sandbox.buildReceiptMutation(expItem);
-assert.equal(mutation.error, 'กรุณาระบุวันหมดอายุที่ใกล้ที่สุด', 'positive receipt must require an expiry date by default');
+assert.equal(mutation.error, undefined, 'positive receipt may omit an expiry date after confirmation');
+assert.equal(mutation.needsExpiryConfirmation, true);
+assert.equal(mutation.item.receiptDateKind, null);
+assert.equal(mutation.item.receiptDate, null);
 
 sandbox.updateReceiptDate('RC-EXP', '15/09/69');
 mutation = sandbox.buildReceiptMutation(expItem);
@@ -162,8 +170,13 @@ assert.equal(alerts.at(-1), 'สินค้า EXP: จำนวนรับจ
 assert.equal(apiCalls.length, beforeInvalidBatchCalls, 'invalid bulk receipt must not call the API');
 
 vm.runInContext("state.recheckQty = { 'RC-EXP': '5', 'RC-MFG': '2' }", sandbox);
-sandbox.updateReceiptDate('RC-EXP', '2027-02-03');
+sandbox.setReceiptDateKind('RC-EXP', 'expiry');
 sandbox.setReceiptDateKind('RC-MFG', 'manufacturing_only');
+confirmResults.push(false);
+const beforeCancelledBatchCalls = apiCalls.length;
+sandbox.confirmRecheckAllItems();
+assert.equal(apiCalls.length, beforeCancelledBatchCalls, 'cancelling the missing-expiry warning must not call the API');
+assert.match(confirmations.at(-1), /คุณยังไม่ได้ใส่วันหมดอายุนะ/);
 sandbox.confirmRecheckAllItems();
 
 setTimeout(() => {
@@ -171,10 +184,12 @@ setTimeout(() => {
     const receiptCall = apiCalls.find(call => call.action === 'receiveInventoryItems');
     assert.ok(receiptCall, 'bulk receipt must use the dedicated API action');
     assert.equal(receiptCall.items.length, 2);
-    assert.equal(receiptCall.items[0].receiptDateKind, 'expiry');
-    assert.equal(receiptCall.items[0].receiptDate, '2027-02-03');
+    assert.equal(receiptCall.items[0].receiptDateKind, null, 'confirmed missing expiry must send no evidence kind');
+    assert.equal(receiptCall.items[0].receiptDate, null, 'confirmed missing expiry must send no date');
     assert.equal(receiptCall.items[1].receiptDateKind, 'manufacturing_only');
     assert.equal(receiptCall.items[1].receiptDate, null);
+    assert.match(confirmations.at(-1), /คุณยังไม่ได้ใส่วันหมดอายุนะ/);
+    assert.match(confirmations.at(-1), /ยืนยันส่งหรือไม่/);
     assert.equal(Object.hasOwn(receiptCall.items[0], 'recheckBy'), false, 'client must not send receiver identity');
     assert.equal(vm.runInContext('state.items[0].status', sandbox), 'รับสินค้าแล้ว');
     assert.equal(vm.runInContext('state.items[1].status', sandbox), 'จัดส่งไม่ครบ');
