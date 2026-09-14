@@ -133,8 +133,267 @@
             #sidebar { display: none !important; }
         }
     </style>
+    <style id="trdakra-modern-ui">
+        :root {
+            --trd-ink: #172033;
+            --trd-ink-strong: #0d1423;
+            --trd-muted: #66738a;
+            --trd-muted-2: #97a2b3;
+            --trd-line: #e5e9ef;
+            --trd-line-strong: #cbd4e0;
+            --trd-soft: #f7f9fc;
+            --trd-blue: #3448d8;
+            --trd-blue-dark: #2637bd;
+            --trd-blue-soft: #eaf0ff;
+            --trd-orange: #e96c3e;
+            --trd-orange-soft: #fff1e9;
+            --trd-teal: #16806d;
+            --trd-teal-soft: #e9f8f2;
+            --trd-red: #c64c55;
+            --trd-shadow-sm: 0 8px 22px rgba(15, 23, 42, .06);
+            --trd-shadow-lg: 0 24px 70px rgba(15, 23, 42, .13);
+            --trd-radius: 14px;
+            --trd-font: Inter, "Noto Sans Thai", system-ui, sans-serif;
+        }
+
+        body.trdakra-shell {
+            min-width: 320px;
+            background: #fff !important;
+            color: var(--trd-ink);
+            font-family: var(--trd-font);
+            letter-spacing: -.01em;
+            line-height: 1.45;
+        }
+        body.trdakra-shell button,
+        body.trdakra-shell input,
+        body.trdakra-shell select,
+        body.trdakra-shell textarea { font-family: inherit; }
+        body.trdakra-shell button:focus-visible,
+        body.trdakra-shell input:focus-visible,
+        body.trdakra-shell select:focus-visible,
+        body.trdakra-shell textarea:focus-visible {
+            outline: 3px solid rgba(52, 72, 216, .24);
+            outline-offset: 2px;
+        }
+
+        .trd-topbar {
+            position: sticky;
+            top: 0;
+            z-index: 60;
+            min-height: 72px;
+            color: #f8fafc;
+            background:
+                radial-gradient(circle at 78% -60%, rgba(82, 106, 235, .28), transparent 39%),
+                linear-gradient(110deg, #0b111c, #151f31);
+            border-bottom: 1px solid rgba(255,255,255,.09);
+            box-shadow: 0 10px 26px rgba(3, 7, 18, .14);
+        }
+        .trd-topbar__inner {
+            width: min(1440px, calc(100% - 44px));
+            min-height: 72px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+        }
+        .trd-topbar__brand,
+        .trd-topbar__actions,
+        .trd-topbar__action,
+        .trd-topbar__user {
+            display: flex;
+            align-items: center;
+        }
+        .trd-topbar__brand { min-width: 0; gap: 11px; }
+        .trd-topbar__app-icon {
+            width: 38px;
+            height: 38px;
+            display: grid;
+            flex: 0 0 auto;
+            place-items: center;
+            border: 1px solid rgba(185, 239, 222, .6);
+            border-radius: 11px;
+            color: #c5f2e3;
+            background: linear-gradient(145deg, rgba(34, 134, 117, .88), rgba(20, 90, 89, .48));
+            box-shadow: 0 8px 18px rgba(15, 23, 42, .12), inset 0 1px 0 rgba(255,255,255,.24);
+        }
+        .trd-topbar__title { min-width: 0; }
+        .trd-topbar__title strong,
+        .trd-topbar__title span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .trd-topbar__title strong { color: #f8fafc; font-size: 16px; font-weight: 700; letter-spacing: -.045em; }
+        .trd-topbar__title span { margin-top: 2px; color: #aeb9c8; font-size: 10px; }
+        .trd-topbar__actions { flex: 0 0 auto; gap: 8px; }
+        .trd-topbar__action {
+            min-height: 36px;
+            gap: 6px;
+            padding: 0 10px;
+            border: 1px solid rgba(255,255,255,.13);
+            border-radius: 9px;
+            color: #b8c4d5;
+            background: rgba(255,255,255,.045);
+            font-size: 11px;
+            font-weight: 600;
+            transition: transform .2s ease, border-color .2s ease, background .2s ease, color .2s ease;
+        }
+        .trd-topbar__action:hover { color: #fff; border-color: rgba(146,160,255,.7); background: rgba(82,100,231,.18); transform: translateY(-1px); }
+        .trd-topbar__action--portal { color: #c5f2e3; border-color: rgba(185,239,222,.22); background: rgba(22,128,109,.12); }
+        .trd-topbar__user { gap: 6px; max-width: 150px; color: #d6deea; font-size: 11px; font-weight: 600; }
+        .trd-topbar__user span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        #trd-module-nav {
+            position: sticky;
+            top: 72px;
+            z-index: 50;
+            border-bottom: 1px solid var(--trd-line);
+            background: rgba(255,255,255,.96);
+            box-shadow: 0 8px 22px rgba(15,23,42,.04);
+            backdrop-filter: blur(14px);
+        }
+        .trd-module-nav__inner {
+            width: min(1440px, calc(100% - 44px));
+            min-height: 58px;
+            margin: 0 auto;
+            display: flex;
+            align-items: stretch;
+            gap: 4px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        .trd-module-nav__inner::-webkit-scrollbar { display: none; }
+        .trd-module-tab {
+            position: relative;
+            min-height: 58px;
+            display: inline-flex;
+            align-items: center;
+            flex: 0 0 auto;
+            gap: 7px;
+            padding: 0 14px;
+            border: 0;
+            border-bottom: 2px solid transparent;
+            color: var(--trd-muted);
+            background: transparent;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+            transition: color .2s ease, background .2s ease, border-color .2s ease;
+        }
+        .trd-module-tab:hover { color: var(--trd-blue); background: #f8faff; }
+        .trd-module-tab.is-active { color: var(--trd-blue); border-bottom-color: var(--trd-blue); background: #fbfcff; }
+        .trd-module-tab__count {
+            min-width: 20px;
+            min-height: 19px;
+            display: inline-grid;
+            place-items: center;
+            padding: 0 5px;
+            border: 1px solid transparent;
+            border-radius: 999px;
+            font-size: 10px;
+            font-weight: 800;
+            line-height: 1;
+        }
+        .trd-module-tab__count--yellow { color: #a96c00; background: #fff7dc; border-color: #f5e2a4; }
+
+        body.trdakra-shell #app-root { display: block !important; width: 100%; min-height: calc(100vh - 130px); background: #fff; }
+        body.trdakra-shell #sidebar { display: none !important; }
+        body.trdakra-shell #main-view {
+            display: block !important;
+            width: 100% !important;
+            min-height: calc(100vh - 130px);
+            overflow: visible !important;
+            background: #fff !important;
+        }
+        body.trdakra-shell #main-view > div {
+            width: min(1440px, calc(100% - 44px)) !important;
+            max-width: none !important;
+            min-height: calc(100vh - 130px);
+            margin: 0 auto !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            background: #fff !important;
+        }
+        body.trdakra-shell #main-view > div > header {
+            position: relative !important;
+            top: auto !important;
+            color: var(--trd-ink) !important;
+            background: #fff !important;
+            border-bottom: 1px solid var(--trd-line) !important;
+            box-shadow: none !important;
+        }
+        body.trdakra-shell #main-view > div > header button,
+        body.trdakra-shell #main-view > div > header .material-icons-round { color: var(--trd-ink) !important; }
+        body.trdakra-shell #main-view > div > header + div.sticky { top: 130px !important; }
+        body.trdakra-shell #main-view > div > header + div.sticky + div.sticky { top: 188px !important; }
+        body.trdakra-shell #main-view > div > main { background: #fff !important; }
+        body.trdakra-shell #main-view .max-w-sm,
+        body.trdakra-shell #main-view .max-w-md,
+        body.trdakra-shell #main-view .max-w-2xl,
+        body.trdakra-shell #main-view .max-w-6xl { max-width: none !important; }
+        body.trdakra-shell #main-view input,
+        body.trdakra-shell #main-view select,
+        body.trdakra-shell #main-view textarea {
+            border-color: var(--trd-line-strong) !important;
+            border-radius: 10px !important;
+            background: #fff !important;
+            color: var(--trd-ink) !important;
+            box-shadow: none !important;
+        }
+        body.trdakra-shell #main-view input:focus,
+        body.trdakra-shell #main-view select:focus,
+        body.trdakra-shell #main-view textarea:focus {
+            border-color: var(--trd-blue) !important;
+            box-shadow: 0 0 0 3px rgba(52,72,216,.12) !important;
+        }
+        body.trdakra-shell #main-view [class*="rounded-2xl"],
+        body.trdakra-shell #main-view [class*="rounded-[1.5rem]"],
+        body.trdakra-shell #main-view [class*="rounded-[2rem]"] { border-color: var(--trd-line); }
+        body.trdakra-shell #main-view .bg-brand-blue { background-color: var(--trd-blue) !important; }
+        body.trdakra-shell #main-view .bg-brand-orange { background-color: var(--trd-orange) !important; }
+        body.trdakra-shell #main-view .text-brand-blue { color: var(--trd-blue) !important; }
+        body.trdakra-shell #main-view .text-brand-orange { color: var(--trd-orange) !important; }
+        body.trdakra-shell #main-view .border-brand-blue { border-color: var(--trd-blue) !important; }
+        body.trdakra-shell #main-view .border-brand-orange { border-color: var(--trd-orange) !important; }
+        body.trdakra-shell #main-view button[class*="bg-brand-blue"],
+        body.trdakra-shell #main-view button[class*="bg-brand-orange"] {
+            border-radius: 10px !important;
+            box-shadow: 0 8px 22px rgba(15,23,42,.08) !important;
+        }
+        body.trdakra-shell #main-view button[class*="bg-brand-blue"]:hover,
+        body.trdakra-shell #main-view button[class*="bg-brand-orange"]:hover { filter: brightness(1.04); transform: translateY(-1px); }
+        body.trdakra-shell #main-view .fixed.bottom-0 {
+            width: min(720px, calc(100% - 24px)) !important;
+            max-width: none !important;
+            border: 1px solid var(--trd-line) !important;
+            border-radius: 16px 16px 0 0;
+        }
+        body.trdakra-shell #main-view .animate-fade-in { animation-duration: .28s; }
+
+        @media (max-width: 767px) {
+            .trd-topbar { min-height: 64px; }
+            .trd-topbar__inner { width: calc(100% - 24px); min-height: 64px; gap: 8px; }
+            .trd-topbar__app-icon { width: 34px; height: 34px; border-radius: 9px; }
+            .trd-topbar__title strong { font-size: 14px; }
+            .trd-topbar__title span,
+            .trd-topbar__user { display: none; }
+            .trd-topbar__actions { gap: 4px; }
+            .trd-topbar__action { width: 34px; min-height: 34px; justify-content: center; padding: 0; }
+            .trd-topbar__action span:last-child { display: none; }
+            #trd-module-nav { top: 64px; }
+            .trd-module-nav__inner { width: calc(100% - 24px); min-height: 54px; }
+            .trd-module-tab { min-height: 54px; padding: 0 10px; font-size: 11px; }
+            body.trdakra-shell #app-root,
+            body.trdakra-shell #main-view { min-height: calc(100vh - 118px); }
+            body.trdakra-shell #main-view > div { width: calc(100% - 24px) !important; min-height: calc(100vh - 118px); }
+            body.trdakra-shell #main-view > div > header + div.sticky { top: 118px !important; }
+            body.trdakra-shell #main-view > div > header + div.sticky + div.sticky { top: 172px !important; }
+            body.trdakra-shell #main-view .hidden.md\:block { display: none !important; }
+            body.trdakra-shell #main-view .md\:hidden { display: flex !important; }
+        }
+    </style>
 </head>
-<body>
+<body class="trdakra-shell">
+
+    <header id="trd-topbar" class="trd-topbar" aria-label="TRDAKRA navigation"></header>
+    <nav id="trd-module-nav" aria-label="เมนู TRDAKRA"></nav>
 
     <!-- Loading Overlay -->
     <div id="loading-overlay" class="flex">
@@ -151,7 +410,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260914.01";
+        const CURRENT_VERSION = "20260914.02";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -6193,6 +6452,42 @@
             window.location.href = SSO_CONFIG.PORTAL_URL;
         }
 
+        function renderTopbar() {
+            const user = window.appSession || {};
+            const username = currentUser || user.name || user.id || 'Demo';
+            const pendingW1 = state.items.filter(i => ACTIVE_W1_STATUSES.includes(i.status)).length;
+            const navItems = [
+                { view: 'home', icon: 'home', label: 'หน้าหลัก' },
+                { view: 'w1', icon: 'shopping_cart', label: 'เบิกสินค้า', count: pendingW1 },
+                { view: 'w2', icon: 'local_shipping', label: 'จัดส่งสินค้า' },
+                { view: 'dashboard', icon: 'bar_chart', label: 'Analytics' },
+                { view: 'location', icon: 'place', label: 'จัดโลเคชั่น' },
+                { view: 'check_stock', icon: 'inventory_2', label: 'ตรวจสต็อก' }
+            ];
+            const topbar = document.getElementById('trd-topbar');
+            const moduleNav = document.getElementById('trd-module-nav');
+            if (topbar) {
+                topbar.innerHTML = `
+                    <div class="trd-topbar__inner">
+                        <div class="trd-topbar__brand">
+                            <div class="trd-topbar__app-icon" aria-hidden="true"><span class="material-icons-round">warehouse</span></div>
+                            <div class="trd-topbar__title"><strong>TRD · AKRA</strong><span>ระบบเบิกจ่ายสินค้า</span></div>
+                        </div>
+                        <div class="trd-topbar__actions">
+                            <div class="trd-topbar__user"><span class="material-icons-round text-[16px]">account_circle</span><span>${esc(username)}</span></div>
+                            <button type="button" class="trd-topbar__action" onclick="fetchInitialData(true)" title="รีเฟรชข้อมูล"><span class="material-icons-round text-[17px]">refresh</span><span>รีเฟรช</span></button>
+                            <button type="button" class="trd-topbar__action trd-topbar__action--portal" onclick="goToPortal()" title="กลับ Main Portal"><span class="material-icons-round text-[17px]">logout</span><span>Main</span></button>
+                        </div>
+                    </div>`;
+            }
+            if (moduleNav) {
+                moduleNav.innerHTML = `<div class="trd-module-nav__inner">${navItems.map(item => `
+                    <button type="button" class="trd-module-tab ${state.view === item.view ? 'is-active' : ''}" onclick="setView('${item.view}')" aria-current="${state.view === item.view ? 'page' : 'false'}">
+                        <span class="material-icons-round text-[17px]">${item.icon}</span>${item.label}${item.count > 0 ? `<span class="trd-module-tab__count trd-module-tab__count--yellow">${item.count}</span>` : ''}
+                    </button>`).join('')}</div>`;
+            }
+        }
+
         function renderSidebar() {
             const user = window.appSession;
             const col  = state.sidebarCollapsed;
@@ -6271,6 +6566,7 @@
 
         // Main Render Function
         function render() {
+            renderTopbar();
             const sidebar  = document.getElementById('sidebar');
             const mainView = document.getElementById('main-view');
 
