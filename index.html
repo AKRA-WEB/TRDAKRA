@@ -366,6 +366,16 @@
             border-radius: 16px 16px 0 0;
         }
         body.trdakra-shell #main-view .animate-fade-in { animation-duration: .28s; }
+        body.trdakra-shell #main-view .animate-slide-up { left: 50% !important; }
+        body.trdakra-shell .trd-sheet-backdrop { z-index: 70; }
+        body.trdakra-shell #main-view .trd-modal-sheet { z-index: 80; max-height: calc(100dvh - 16px) !important; overscroll-behavior: contain; }
+        .trd-modal-sheet button { min-height: 44px; min-width: 44px; }
+        .trd-sheet-heading { min-width: 0; flex: 1; }
+        .trd-sheet-heading > p:last-child { max-width: none !important; white-space: normal; overflow-wrap: anywhere; }
+        .trd-home-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        @media (min-width: 1100px) {
+            .trd-home-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        }
 
         @media (max-width: 767px) {
             .trd-topbar { min-height: 64px; }
@@ -375,7 +385,7 @@
             .trd-topbar__title span,
             .trd-topbar__user { display: none; }
             .trd-topbar__actions { gap: 4px; }
-            .trd-topbar__action { width: 34px; min-height: 34px; justify-content: center; padding: 0; }
+            .trd-topbar__action { width: 44px; min-height: 44px; justify-content: center; padding: 0; }
             .trd-topbar__action span:last-child { display: none; }
             #trd-module-nav { top: 64px; }
             .trd-module-nav__inner { width: calc(100% - 24px); min-height: 54px; }
@@ -387,6 +397,16 @@
             body.trdakra-shell #main-view > div > header + div.sticky + div.sticky { top: 172px !important; }
             body.trdakra-shell #main-view .hidden.md\:block { display: none !important; }
             body.trdakra-shell #main-view .md\:hidden { display: flex !important; }
+            .trd-home-mobile { min-height: 0; padding: 16px 0; justify-content: flex-start; }
+            .trd-home-mobile > div:first-child { position: static; align-self: flex-end; margin-bottom: 8px; max-width: 100%; overflow-wrap: anywhere; }
+            .trd-home-menu { margin-top: 0; padding: 16px; border-radius: 14px; box-shadow: none; }
+            .trd-home-menu > div:first-child { width: 40px; height: 40px; margin-bottom: 8px; }
+            .trd-home-menu > div:first-child .material-icons-round { font-size: 24px !important; }
+            .trd-home-menu h1 { font-size: 20px; }
+            .trd-home-menu > p { margin-bottom: 16px; }
+            .trd-home-menu > div:last-child > * + * { margin-top: 8px; }
+            .trd-home-menu button { min-height: 48px; padding: 10px 12px; gap: 8px; text-align: left; justify-content: flex-start; font-size: 14px; }
+            .trd-home-menu button > .material-icons-round { flex-shrink: 0; }
         }
     </style>
 </head>
@@ -410,7 +430,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260914.02";
+        const CURRENT_VERSION = "20260914.03";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -1451,8 +1471,8 @@
             const canSave = selectedCount > 0;
             
             return `
-                <div onclick="closeZonePopupAdd()" class="fixed inset-0 bg-black/40 z-40"></div>
-                <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-[#f8fafc] rounded-t-[2rem] z-50 shadow-2xl flex flex-col animate-slide-up" style="height: 80vh;">
+                <div onclick="closeZonePopupAdd()" class="trd-sheet-backdrop fixed inset-0 bg-black/40 z-40"></div>
+                <div class="trd-modal-sheet fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-[#f8fafc] rounded-t-[2rem] z-50 shadow-2xl flex flex-col animate-slide-up" style="height: 80vh;">
                     <!-- Header -->
                     <div class="flex items-center justify-between p-4 bg-white border-b border-slate-100 rounded-t-[2rem]">
                         <div>
@@ -4821,12 +4841,12 @@
                 <div class="w-full min-h-screen">
 
                     <!-- ── Mobile layout (hidden on desktop) ── -->
-                    <div class="md:hidden w-full max-w-sm flex flex-col items-center justify-center p-5 mx-auto relative min-h-screen">
+                    <div class="trd-home-mobile md:hidden w-full max-w-sm flex flex-col items-center justify-center p-5 mx-auto relative min-h-screen">
                         <div class="absolute top-6 right-6 bg-white/90 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-sm border border-slate-100 flex items-center gap-1.5 text-xs font-semibold text-brand-blue z-10 tracking-wide">
                             <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
                             ${esc(currentUser)}
                         </div>
-                        <div class="bg-white p-10 rounded-[2.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.06)] w-full text-center border border-slate-50 mt-6">
+                        <div class="trd-home-menu bg-white p-10 rounded-[2.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.06)] w-full text-center border border-slate-50 mt-6">
                             <div class="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 bg-brand-blue/10 text-brand-blue shadow-inner">
                                 <span class="material-icons-round" style="font-size: 36px;">local_shipping</span>
                             </div>
@@ -4861,7 +4881,7 @@
                         </div>
 
                         <!-- Stats strip -->
-                        <div class="px-8 pt-6 pb-2 grid grid-cols-4 gap-4">
+                        <div class="trd-home-stats px-8 pt-6 pb-2 grid grid-cols-4 gap-4">
                             ${[
                                 { label: 'รายการค้าง (W1)', value: pendingW1, icon: 'pending_actions', color: pendingW1 > 0 ? 'text-amber-600 bg-amber-50' : 'text-slate-500 bg-slate-100' },
                                 { label: 'สินค้าทั้งหมด', value: totalProducts, icon: 'inventory_2', color: 'text-brand-blue bg-blue-50' },
@@ -5462,11 +5482,11 @@
             const stepNum = (n) => `<span class="w-5 h-5 rounded-full bg-brand-blue text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">${n}</span>`;
 
             return `
-                <div onclick="closeLocationSheet()" class="fixed inset-0 bg-black/50 z-40 backdrop-blur-sm"></div>
-                <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white rounded-t-[2rem] z-50 shadow-2xl animate-slide-up" style="max-height:92vh;overflow-y:auto">
+                <div onclick="closeLocationSheet()" class="trd-sheet-backdrop fixed inset-0 bg-black/50 z-40 backdrop-blur-sm"></div>
+                <div class="trd-modal-sheet fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white rounded-t-[2rem] z-50 shadow-2xl animate-slide-up" style="max-height:92vh;overflow-y:auto">
 
                     <div class="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100">
-                        <div>
+                        <div class="trd-sheet-heading">
                             <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">${isBulk ? 'จัดพิกัดกลุ่ม' : 'กำหนดตำแหน่งสินค้า'}</p>
                             <p class="text-sm font-bold text-brand-blue truncate mt-0.5" style="max-width:240px">${displayTitle}</p>
                         </div>
