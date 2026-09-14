@@ -4,6 +4,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const versionConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'version.json'), 'utf8'));
 const script = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)]
   .map(match => match[1].trim())
   .find(code => code.includes('function buildReceiptMutation'));
@@ -69,7 +70,7 @@ const sandbox = {
   alert(message) { alerts.push(String(message)); },
   fetch: async (url, options = {}) => {
     const target = String(url);
-    if (target.includes('version.json')) return { ok: true, json: async () => ({ version: '20260910.03' }) };
+    if (target.includes('version.json')) return { ok: true, json: async () => ({ version: versionConfig.version }) };
     const payload = JSON.parse(options.body || '{}');
     apiCalls.push(payload);
     if (payload.action === 'receiveInventoryItems') {

@@ -15,10 +15,11 @@ const versionJson = JSON.parse(fs.readFileSync(versionJsonPath, 'utf8'));
 // 1. Version Parity
 console.log('--- TEST 1: Version Parity ---');
 assert.strictEqual(
-  versionJson.version,
-  '20260910.03',
-  'version.json must be 20260910.03'
+  typeof versionJson.version,
+  'string',
+  'version.json must contain a version string'
 );
+assert.match(versionJson.version, /^\d{8}\.\d{2}$/, 'version.json must use YYYYMMDD.NN format');
 assert(
   indexHtml.includes(`const CURRENT_VERSION = "${versionJson.version}";`),
   `index.html CURRENT_VERSION must match version.json (${versionJson.version})`
