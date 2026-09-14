@@ -430,7 +430,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260914.03";
+        const CURRENT_VERSION = "20260914.04";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -627,6 +627,7 @@
             w2PartialQty: {},
             receiptDrafts: {}, // { requestId: { kind: 'expiry'|'manufacturing_only', date: 'YYYY-MM-DD' } }
             historySearch: '',
+            historyPage: 0,
             historySort: 'request',
             historyDir: 'desc',
             dashboardFilter: 'week',
@@ -2810,41 +2811,51 @@
             if (q) items = items.filter(i =>
                 String(i.itemName || '').toLowerCase().includes(q) ||
                 String(i.id || '').toLowerCase().includes(q));
-            const dir = state.historyDir === 'asc' ? 1 : -1;   // asc = เก่าไปใหม่, desc = ใหม่ไปเก่า
-            if (state.historySort === 'dispatch') {
-                items = items.slice().sort((a, b) => {
-                    // หากเรียงตามวันที่จัดส่ง ให้รายการที่ รอตรวจรับ อยู่บนสุดเมื่อเรียง desc
-                    if (state.historyDir !== 'asc') {
-                        const aWait = a.status === 'รอตรวจรับ' ? 1 : 0;
-                        const bWait = b.status === 'รอตรวจรับ' ? 1 : 0;
-                        if (aWait !== bWait) return bWait - aWait;
-                    }
-                    const da = a.dispatchTimestamp ? parseFormattedDate(a.dispatchTimestamp) : null;
-                    const db = b.dispatchTimestamp ? parseFormattedDate(b.dispatchTimestamp) : null;
-                    if (!da && !db) return 0;
-                    if (!da) return 1;   // missing dispatch date always sorts last
-                    if (!db) return -1;
-                    return (da - db) * dir;
-                });
-            } else {
-                items = items.slice().sort((a, b) => {
-                    // ให้สินค้าที่รอกดรับ (รอตรวจรับ) ขึ้นมาอยู่บนสุดของประวัติเมื่อดูจากใหม่ไปเก่า
-                    if (state.historyDir !== 'asc') {
-                        const aWait = a.status === 'รอตรวจรับ' ? 1 : 0;
-                        const bWait = b.status === 'รอตรวจรับ' ? 1 : 0;
-                        if (aWait !== bWait) return bWait - aWait;
-                    }
-                    const da = a.rawDate ? new Date(a.rawDate) : new Date(0);
-                    const db = b.rawDate ? new Date(b.rawDate) : new Date(0);
-                    return (da - db) * dir;
-                });
-            }
-            return items;
+            const dir = state.historyDir === 'asc' ? 1 : -1;
+            const dispatch = state.historySort === 'dispatch';
+            // Parse each date once, preserving missing/invalid-date and stable tie behavior.
+            return items.map(item => {
+                const date = dispatch
+                    ? (item.dispatchTimestamp ? parseFormattedDate(item.dispatchTimestamp) : null)
+                    : (item.rawDate ? new Date(item.rawDate) : new Date(0));
+                return { item, date: date === null ? null : +date };
+            }).sort((a, b) => {
+                if (state.historyDir !== 'asc') {
+                    const aWait = a.item.status === 'รอตรวจรับ' ? 1 : 0;
+                    const bWait = b.item.status === 'รอตรวจรับ' ? 1 : 0;
+                    if (aWait !== bWait) return bWait - aWait;
+                }
+                if (dispatch) {
+                    if (a.date === null && b.date === null) return 0;
+                    if (a.date === null) return 1;
+                    if (b.date === null) return -1;
+                }
+                return (a.date - b.date) * dir;
+            }).map(entry => entry.item);
+        }
+
+        function renderHistoryPage(role) {
+            const items = getFilteredHistory();
+            const pageSize = 50;
+            const lastPage = Math.max(0, Math.ceil(items.length / pageSize) - 1);
+            state.historyPage = Math.min(Math.max(0, state.historyPage || 0), lastPage);
+            const start = state.historyPage * pageSize;
+            const cards = renderHistoryCards(items.slice(start, start + pageSize), role);
+            if (items.length <= pageSize) return cards;
+            return cards + '<div class="flex items-center justify-center gap-3 py-3">' +
+                '<button type="button" onclick="changeHistoryPage(-1)" ' + (state.historyPage === 0 ? 'disabled' : '') + ' class="px-3 py-2 border rounded-xl disabled:opacity-40">ก่อนหน้า</button>' +
+                '<span class="text-xs text-slate-500">' + (start + 1) + '–' + Math.min(start + pageSize, items.length) + ' / ' + items.length + '</span>' +
+                '<button type="button" onclick="changeHistoryPage(1)" ' + (state.historyPage === lastPage ? 'disabled' : '') + ' class="px-3 py-2 border rounded-xl disabled:opacity-40">ถัดไป</button></div>';
+        }
+
+        function changeHistoryPage(delta) {
+            state.historyPage = (state.historyPage || 0) + delta;
+            refreshHistoryList();
         }
 
         function refreshHistoryList() {
             const listEl = document.getElementById('history-list');
-            if (listEl) listEl.innerHTML = renderHistoryCards(getFilteredHistory(), state._historyRole || 'w1');
+            if (listEl) listEl.innerHTML = renderHistoryPage(state._historyRole || 'w1');
         }
 
         function historyDirBtnInner() {
@@ -2854,16 +2865,19 @@
 
         function updateHistorySearch(value) {
             state.historySearch = value;
+            state.historyPage = 0;
             refreshHistoryList();
         }
 
         function setHistorySort(mode) {
             state.historySort = mode;
+            state.historyPage = 0;
             refreshHistoryList();
         }
 
         function toggleHistoryDir() {
             state.historyDir = state.historyDir === 'asc' ? 'desc' : 'asc';
+            state.historyPage = 0;
             const btn = document.getElementById('history-dir-btn');
             if (btn) btn.innerHTML = historyDirBtnInner();
             refreshHistoryList();
@@ -2901,7 +2915,7 @@
                             class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-600 flex items-center justify-center gap-1 hover:border-brand-blue transition-all active:scale-[0.98]">${historyDirBtnInner()}</button>
                     </div>
                 </div>
-                <div id="history-list" class="space-y-4">${renderHistoryCards(getFilteredHistory(), role)}</div>
+                <div id="history-list" class="space-y-4">${renderHistoryPage(role)}</div>
             </div>`;
         }
 
