@@ -187,7 +187,9 @@
                 linear-gradient(110deg, #0b111c, #151f31);
             border-bottom: 1px solid rgba(255,255,255,.09);
             box-shadow: 0 10px 26px rgba(3, 7, 18, .14);
+            transition: transform .22s ease, box-shadow .22s ease;
         }
+        .trd-topbar.is-hidden-on-scroll { transform: translateY(calc(-100% - 8px)); }
         .trd-topbar__inner {
             width: min(1440px, calc(100% - 44px));
             min-height: 72px;
@@ -239,6 +241,73 @@
         .trd-topbar__action--portal { color: #c5f2e3; border-color: rgba(185,239,222,.22); background: rgba(22,128,109,.12); }
         .trd-topbar__user { gap: 6px; max-width: 150px; color: #d6deea; font-size: 11px; font-weight: 600; }
         .trd-topbar__user span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .trd-mobile-menu-trigger { display: none; }
+
+        #trd-mobile-menu-root { display: none; }
+        #trd-mobile-menu-root.is-open { display: block; }
+        .trd-mobile-menu__backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            background: rgba(15, 23, 42, .42);
+            backdrop-filter: blur(2px);
+        }
+        .trd-mobile-menu__panel {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 101;
+            width: min(88vw, 360px);
+            overflow-y: auto;
+            padding: max(16px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom));
+            background: #fff;
+            box-shadow: -18px 0 45px rgba(15,23,42,.18);
+            transform: translateX(100%);
+            transition: transform .22s ease;
+        }
+        #trd-mobile-menu-root.is-open .trd-mobile-menu__panel { transform: translateX(0); }
+        .trd-mobile-menu__header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 4px 0 16px;
+            border-bottom: 1px solid var(--trd-line);
+        }
+        .trd-mobile-menu__close {
+            width: 40px;
+            height: 40px;
+            display: inline-grid;
+            place-items: center;
+            flex: 0 0 auto;
+            border: 1px solid var(--trd-line);
+            border-radius: 12px;
+            color: var(--trd-muted);
+            background: var(--trd-soft);
+        }
+        .trd-mobile-menu__items { display: grid; gap: 8px; padding-top: 16px; }
+        .trd-mobile-menu__item {
+            min-height: 52px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            width: 100%;
+            padding: 0 14px;
+            border: 1px solid var(--trd-line);
+            border-radius: 14px;
+            color: var(--trd-muted);
+            background: #fff;
+            font-size: 14px;
+            font-weight: 700;
+            text-align: left;
+        }
+        .trd-mobile-menu__item.is-active {
+            border-color: rgba(52,72,216,.2);
+            color: var(--trd-blue);
+            background: var(--trd-blue-soft);
+        }
+        .trd-mobile-menu__item .material-icons-round { color: currentColor; }
 
         #trd-module-nav {
             position: sticky;
@@ -378,23 +447,23 @@
         }
 
         @media (max-width: 767px) {
-            .trd-topbar { min-height: 64px; }
-            .trd-topbar__inner { width: calc(100% - 24px); min-height: 64px; gap: 8px; }
-            .trd-topbar__app-icon { width: 34px; height: 34px; border-radius: 9px; }
+            .trd-topbar { min-height: 56px; }
+            .trd-topbar__inner { width: calc(100% - 24px); min-height: 56px; gap: 8px; }
+            .trd-topbar__app-icon { width: 32px; height: 32px; border-radius: 9px; }
             .trd-topbar__title strong { font-size: 14px; }
             .trd-topbar__title span,
             .trd-topbar__user { display: none; }
             .trd-topbar__actions { gap: 4px; }
-            .trd-topbar__action { width: 44px; min-height: 44px; justify-content: center; padding: 0; }
+            .trd-topbar__action { width: 40px; min-height: 40px; justify-content: center; padding: 0; }
             .trd-topbar__action span:last-child { display: none; }
-            #trd-module-nav { top: 64px; }
-            .trd-module-nav__inner { width: calc(100% - 24px); min-height: 54px; }
-            .trd-module-tab { min-height: 54px; padding: 0 10px; font-size: 11px; }
+            .trd-mobile-menu-trigger { display: flex; }
+            #trd-module-nav { display: none; }
             body.trdakra-shell #app-root,
-            body.trdakra-shell #main-view { min-height: calc(100vh - 118px); }
-            body.trdakra-shell #main-view > div { width: calc(100% - 24px) !important; min-height: calc(100vh - 118px); }
-            body.trdakra-shell #main-view > div > header + div.sticky { top: 118px !important; }
-            body.trdakra-shell #main-view > div > header + div.sticky + div.sticky { top: 172px !important; }
+            body.trdakra-shell #main-view { min-height: calc(100vh - 56px); }
+            body.trdakra-shell #main-view > div { width: calc(100% - 24px) !important; min-height: calc(100vh - 56px); }
+            body.trdakra-shell #main-view > div > header + div.sticky { top: 56px !important; }
+            body.trdakra-shell #main-view > div > header + div.sticky + div.sticky { top: 110px !important; }
+            body.trd-mobile-menu-open { overflow: hidden; }
             body.trdakra-shell #main-view .hidden.md\:block { display: none !important; }
             body.trdakra-shell #main-view .md\:hidden { display: flex !important; }
             .trd-home-mobile { min-height: 0; padding: 16px 0; justify-content: flex-start; }
@@ -414,6 +483,7 @@
 
     <header id="trd-topbar" class="trd-topbar" aria-label="TRDAKRA navigation"></header>
     <nav id="trd-module-nav" aria-label="เมนู TRDAKRA"></nav>
+    <div id="trd-mobile-menu-root" aria-hidden="true"></div>
 
     <!-- Loading Overlay -->
     <div id="loading-overlay" class="flex">
@@ -430,7 +500,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260914.04";
+        const CURRENT_VERSION = "20260915.01";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -2056,6 +2126,7 @@
         // 4. ACTION HANDLERS
         // ==========================================
         function setView(viewName) {
+            closeMobileMenu();
             state.view = viewName;
             state.w2BatchEdits = {};
             if (viewName === 'w1') {
@@ -6486,6 +6557,79 @@
             window.location.href = SSO_CONFIG.PORTAL_URL;
         }
 
+        const mobileNavState = {
+            initialized: false,
+            lastScrollY: 0,
+            topbarHidden: false,
+            menuOpen: false
+        };
+        const MOBILE_NAV_TOP_TOLERANCE = 12;
+        const MOBILE_NAV_DIRECTION_THRESHOLD = 4;
+
+        function getMobileScrollY() {
+            return Math.max(0, Number(window.scrollY || document.documentElement.scrollTop || 0));
+        }
+
+        function syncMobileTopbar() {
+            const topbar = document.getElementById('trd-topbar');
+            if (topbar) topbar.classList.toggle('is-hidden-on-scroll', mobileNavState.topbarHidden);
+        }
+
+        function handleMobileNavScroll() {
+            const currentY = getMobileScrollY();
+            const delta = currentY - mobileNavState.lastScrollY;
+            if (currentY <= MOBILE_NAV_TOP_TOLERANCE || delta <= -MOBILE_NAV_DIRECTION_THRESHOLD) {
+                mobileNavState.topbarHidden = false;
+            } else if (delta >= MOBILE_NAV_DIRECTION_THRESHOLD) {
+                mobileNavState.topbarHidden = true;
+            }
+            mobileNavState.lastScrollY = currentY;
+            syncMobileTopbar();
+        }
+
+        function syncMobileMenu() {
+            const root = document.getElementById('trd-mobile-menu-root');
+            const trigger = document.getElementById('trd-mobile-menu-trigger');
+            const open = mobileNavState.menuOpen;
+            if (root) {
+                root.classList.toggle('is-open', open);
+                root.setAttribute('aria-hidden', String(!open));
+            }
+            if (trigger) {
+                trigger.setAttribute('aria-expanded', String(open));
+                trigger.setAttribute('aria-label', open ? 'ปิดเมนู' : 'เปิดเมนู');
+                trigger.title = open ? 'ปิดเมนู' : 'เปิดเมนู';
+            }
+            if (document.body && document.body.classList) {
+                document.body.classList.toggle('trd-mobile-menu-open', open);
+            }
+        }
+
+        function toggleMobileMenu(nextState) {
+            mobileNavState.menuOpen = typeof nextState === 'boolean' ? nextState : !mobileNavState.menuOpen;
+            syncMobileMenu();
+        }
+
+        function closeMobileMenu() {
+            toggleMobileMenu(false);
+        }
+
+        function initMobileNavigation() {
+            if (mobileNavState.initialized) {
+                syncMobileTopbar();
+                syncMobileMenu();
+                return;
+            }
+            mobileNavState.initialized = true;
+            mobileNavState.lastScrollY = getMobileScrollY();
+            window.addEventListener('scroll', handleMobileNavScroll, { passive: true });
+            document.addEventListener('keydown', event => {
+                if (event.key === 'Escape') closeMobileMenu();
+            });
+            syncMobileTopbar();
+            syncMobileMenu();
+        }
+
         function renderTopbar() {
             const user = window.appSession || {};
             const username = currentUser || user.name || user.id || 'Demo';
@@ -6509,6 +6653,7 @@
                         </div>
                         <div class="trd-topbar__actions">
                             <div class="trd-topbar__user"><span class="material-icons-round text-[16px]">account_circle</span><span>${esc(username)}</span></div>
+                            <button type="button" id="trd-mobile-menu-trigger" class="trd-topbar__action trd-mobile-menu-trigger" onclick="toggleMobileMenu()" title="เปิดเมนู" aria-label="เปิดเมนู" aria-controls="trd-mobile-menu-root" aria-expanded="false"><span class="material-icons-round text-[17px]">menu</span><span>เมนู</span></button>
                             <button type="button" class="trd-topbar__action" onclick="fetchInitialData(true)" title="รีเฟรชข้อมูล"><span class="material-icons-round text-[17px]">refresh</span><span>รีเฟรช</span></button>
                             <button type="button" class="trd-topbar__action trd-topbar__action--portal" onclick="goToPortal()" title="กลับ Main Portal"><span class="material-icons-round text-[17px]">logout</span><span>Main</span></button>
                         </div>
@@ -6518,8 +6663,31 @@
                 moduleNav.innerHTML = `<div class="trd-module-nav__inner">${navItems.map(item => `
                     <button type="button" class="trd-module-tab ${state.view === item.view ? 'is-active' : ''}" onclick="setView('${item.view}')" aria-current="${state.view === item.view ? 'page' : 'false'}">
                         <span class="material-icons-round text-[17px]">${item.icon}</span>${item.label}${item.count > 0 ? `<span class="trd-module-tab__count trd-module-tab__count--yellow">${item.count}</span>` : ''}
-                    </button>`).join('')}</div>`;
+                        </button>`).join('')}</div>`;
             }
+            const mobileMenuRoot = document.getElementById('trd-mobile-menu-root');
+            if (mobileMenuRoot) {
+                mobileMenuRoot.innerHTML = `
+                    <div class="trd-mobile-menu__backdrop" onclick="closeMobileMenu()" aria-hidden="true"></div>
+                    <section class="trd-mobile-menu__panel" role="dialog" aria-modal="true" aria-labelledby="trd-mobile-menu-title">
+                        <div class="trd-mobile-menu__header">
+                            <div>
+                                <p class="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-400">TRD · AKRA</p>
+                                <h2 id="trd-mobile-menu-title" class="mt-1 text-lg font-extrabold text-slate-800">เมนูระบบ</h2>
+                            </div>
+                            <button type="button" class="trd-mobile-menu__close" onclick="closeMobileMenu()" aria-label="ปิดเมนู"><span class="material-icons-round">close</span></button>
+                        </div>
+                        <nav class="trd-mobile-menu__items" aria-label="เมนูโมดูล TRDAKRA">
+                            ${navItems.map(item => `
+                                <button type="button" class="trd-mobile-menu__item ${state.view === item.view ? 'is-active' : ''}" onclick="setView('${item.view}')" aria-current="${state.view === item.view ? 'page' : 'false'}">
+                                    <span class="material-icons-round text-[20px]">${item.icon}</span>
+                                    <span class="min-w-0 flex-1 truncate">${item.label}</span>
+                                    ${item.count > 0 ? `<span class="trd-module-tab__count trd-module-tab__count--yellow">${item.count}</span>` : ''}
+                                </button>`).join('')}
+                        </nav>
+                    </section>`;
+            }
+            syncMobileMenu();
         }
 
         function renderSidebar() {
@@ -6754,6 +6922,7 @@
             const isVersionOk = await checkAppVersion();
             if (isVersionOk) {
                 AppVersionGuard.start({ current: CURRENT_VERSION, readActions: [] });
+                initMobileNavigation();
                 ssoInit();
             }
         };
