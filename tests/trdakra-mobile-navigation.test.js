@@ -167,3 +167,51 @@ documentObject.dispatchEvent({ type: 'keydown', key: 'Escape' });
 assert.equal(menuRoot.classList.contains('is-open'), false, 'Escape closes the mobile menu');
 
 console.log('PASS: TRDAKRA mobile navigation scroll and menu controller behavior.');
+
+// Execute the operational dashboard renderers with real state, including empty
+// data, unsafe display values and newest-first ordering. Assertions inspect
+// renderer output, never source-text presence.
+vm.runInContext(`
+  state.products = [{name:'Flour <sample>',unit:'ถุง',floor:'1'}];
+  state.items = [
+    {id:'old', itemName:'Flour <sample>', requestQty:2, status:'สั่งเบิก', rawDate:'2026-09-01T00:00:00Z', requestedBy:'A & B'},
+    {id:'new', itemName:'Flour <sample>', requestQty:3, status:'รอตรวจรับ', rawDate:'2026-09-15T00:00:00Z'}
+  ];
+`, sandbox);
+const home = sandbox.renderHome();
+const values = [...home.matchAll(/<strong>(\d+)<\/strong><small>/g)].map(m => Number(m[1]));
+assert.deepEqual(values, [1, 0, 1, 0], 'home counts actual request/preparing/recheck/unlocated states');
+const beforeItems = vm.runInContext('JSON.stringify(state.items)', sandbox);
+const table = vm.runInContext('renderRequestTable(state.items)', sandbox);
+assert.ok(table.indexOf('new') < table.indexOf('old'), 'latest request renders first');
+assert.match(table, /Flour &lt;sample&gt;/, 'product text is escaped');
+assert.match(table, /A &amp; B/, 'requester text is escaped');
+assert.equal(vm.runInContext('JSON.stringify(state.items)', sandbox), beforeItems, 'render sorting does not mutate shared state');
+assert.equal((table.match(/<tbody>[\s\S]*?<\/tbody>/)[0].match(/<tr>/g) || []).length, 2);
+assert.match(sandbox.renderRequestTable([]), /ไม่มีรายการในช่วงเวลานี้/);
+vm.runInContext('state.items = []; state.products = [];', sandbox);
+assert.deepEqual([...sandbox.renderHome().matchAll(/<strong>(\d+)<\/strong><small>/g)].map(m => Number(m[1])), [0,0,0,0]);
+const summary = sandbox.renderDashboardSummary([], [], new Date('2026-09-01'));
+assert.match(summary, /ไม่มีข้อมูลในช่วงเวลานี้/);
+assert.match(summary, /ไม่มีข้อมูลผู้ขอเบิกในช่วงนี้/);
+assert.doesNotMatch(summary, /NaN|undefined/);
+const manyRows = Array.from({length:25}, (_,i) => ({id:'row-'+i,itemName:'Sample',requestQty:1,status:'สั่งเบิก',rawDate:new Date(2026,8,i+1).toISOString()}));
+const limited = sandbox.renderRequestTable(manyRows);
+assert.equal((limited.match(/<tbody>[\s\S]*?<\/tbody>/)[0].match(/<tr>/g) || []).length,20,'table caps output at twenty rows');
+assert.match(limited, /row-24/);
+assert.doesNotMatch(limited, />row-0</);
+console.log('PASS: Dashboard runtime counts, empty report, escaping and immutable newest-first table.');
+
+vm.runInContext("state.view = 'w1'; state.w1Tab = 'request';", sandbox);
+sandbox.renderTopbar();
+const storefrontNav = elements.get('trd-module-nav').innerHTML;
+assert.equal((storefrontNav.match(/<button /g) || []).length,5,'desktop has one combined storefront entry');
+assert.doesNotMatch(storefrontNav,/setView\('w1'\)/,'manual request is not a separate top-level route');
+assert.match(storefrontNav,/is-active[^>]+setView\('check_stock'\)/,'manual request highlights parent survey menu');
+const storefrontTabs = sandbox.renderStorefrontTabs();
+assert.match(storefrontTabs,/setW1Tab\('request'\)/);
+assert.match(storefrontTabs,/setW1Tab\('pending'\)/);
+assert.match(storefrontTabs,/setW1Tab\('history'\)/);
+vm.runInContext("state.view = 'check_stock';",sandbox);
+assert.match(sandbox.renderStorefrontTabs(),/is-active[^>]+setView\('check_stock'\)/);
+console.log('PASS: Survey-first navigation grouping, parent selection and manual/receiving/history access.');

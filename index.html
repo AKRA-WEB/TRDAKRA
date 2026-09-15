@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="tailwind.css">
     <!-- Google Material Icons -->
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         /* Custom Styles & Animations */
         body {
@@ -441,10 +441,6 @@
         .trd-modal-sheet button { min-height: 44px; min-width: 44px; }
         .trd-sheet-heading { min-width: 0; flex: 1; }
         .trd-sheet-heading > p:last-child { max-width: none !important; white-space: normal; overflow-wrap: anywhere; }
-        .trd-home-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        @media (min-width: 1100px) {
-            .trd-home-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-        }
 
         @media (max-width: 767px) {
             .trd-topbar { min-height: 56px; }
@@ -466,17 +462,180 @@
             body.trd-mobile-menu-open { overflow: hidden; }
             body.trdakra-shell #main-view .hidden.md\:block { display: none !important; }
             body.trdakra-shell #main-view .md\:hidden { display: flex !important; }
-            .trd-home-mobile { min-height: 0; padding: 16px 0; justify-content: flex-start; }
-            .trd-home-mobile > div:first-child { position: static; align-self: flex-end; margin-bottom: 8px; max-width: 100%; overflow-wrap: anywhere; }
-            .trd-home-menu { margin-top: 0; padding: 16px; border-radius: 14px; box-shadow: none; }
-            .trd-home-menu > div:first-child { width: 40px; height: 40px; margin-bottom: 8px; }
-            .trd-home-menu > div:first-child .material-icons-round { font-size: 24px !important; }
-            .trd-home-menu h1 { font-size: 20px; }
-            .trd-home-menu > p { margin-bottom: 16px; }
-            .trd-home-menu > div:last-child > * + * { margin-top: 8px; }
-            .trd-home-menu button { min-height: 48px; padding: 10px 12px; gap: 8px; text-align: left; justify-content: flex-start; font-size: 14px; }
-            .trd-home-menu button > .material-icons-round { flex-shrink: 0; }
         }
+    </style>
+    <style id="trdakra-saas-ui">
+        :root {
+            --trd-blue: #2563eb;
+            --trd-blue-dark: #1d4ed8;
+            --trd-blue-soft: #eff6ff;
+            --trd-muted: #475569;
+            --trd-line: #e2e8f0;
+            --trd-soft: #f5f7fa;
+            --trd-orange: #c2410c;
+        }
+        body.trdakra-shell { background: var(--trd-soft) !important; }
+        body.trdakra-shell ::selection { background: #dbeafe; color: #172033; }
+        body.trdakra-shell input, body.trdakra-shell textarea { caret-color: var(--trd-blue); }
+        body.trdakra-shell * { scrollbar-color: #94a3b8 #f1f5f9; scrollbar-width: thin; }
+        .trd-topbar { color: var(--trd-ink); background: #fff; border-bottom: 1px solid var(--trd-line); box-shadow: none; }
+        .trd-topbar__title strong { color: var(--trd-ink); letter-spacing: -.02em; }
+        .trd-topbar__title span, .trd-topbar__user { color: var(--trd-muted); font-size: 12px; }
+        .trd-topbar__app-icon { color: var(--trd-blue); background: var(--trd-blue-soft); border: 0; box-shadow: none; }
+        .trd-topbar__action { color: var(--trd-muted); background: #f1f5f9; border-color: #f1f5f9; font-size: 12px; }
+        .trd-topbar__action:hover { color: var(--trd-blue-dark); background: #eff6ff; border-color: #bfdbfe; transform: none; }
+        .trd-topbar__action--portal { color: #b91c1c; background: #fff1f2; border-color: #fff1f2; }
+        .trd-mobile-menu__panel { background: #0e1729; color: #fff; }
+        .trd-mobile-menu__header { border-color: #293449; }
+        .trd-mobile-menu__header h2 { color: #fff; }
+        .trd-mobile-menu__header p { color: #cbd5e1; }
+        .trd-mobile-menu__close { background: #1e293b; color: #e2e8f0; border-color: #334155; }
+        .trd-mobile-menu__item { background: transparent; border-color: transparent; color: #cbd5e1; border-radius: 10px; }
+        .trd-mobile-menu__item.is-active { background: var(--trd-blue); border-color: var(--trd-blue); color: #fff; }
+        body.trdakra-shell #app-root, body.trdakra-shell #main-view,
+        body.trdakra-shell #main-view > div, body.trdakra-shell #main-view > div > main { background: var(--trd-soft) !important; }
+        body.trdakra-shell #main-view > div > header,
+        body.trdakra-shell #main-view > div > header.bg-brand-blue { background: transparent !important; padding: 24px 0; }
+        body.trdakra-shell #main-view > div > header [class*="text-white"] { color: var(--trd-muted); }
+        body.trdakra-shell #main-view > div > header [class*="bg-white/"] { background: #eaf0f7; }
+        body.trdakra-shell #main-view > div > header h1 { font-size: 24px; line-height: 1.4; }
+        body.trdakra-shell #main-view > div > header p { color: var(--trd-muted); }
+        body.trdakra-shell #main-view > div > main { padding-left: 0; padding-right: 0; }
+        body.trdakra-shell #main-view .text-slate-400 { color: #64748b; }
+        body.trdakra-shell #main-view label[class*="text-[10px]"],
+        body.trdakra-shell #main-view label[class*="text-[11px]"] { font-size: 12px; letter-spacing: 0; }
+        body.trdakra-shell #main-view input::placeholder,
+        body.trdakra-shell #main-view textarea::placeholder { color: #64748b; opacity: 1; }
+        body.trdakra-shell #main-view [class*="rounded-2xl"],
+        body.trdakra-shell #main-view [class*="rounded-[2rem]"] { border-radius: 14px; }
+        body.trdakra-shell #main-view .shadow-sm,
+        body.trdakra-shell #main-view button[class*="bg-brand-"] { box-shadow: none !important; }
+        @media (min-width: 1024px) {
+            .trd-topbar { margin-left: 220px; min-height: 76px; }
+            .trd-topbar__inner { width: calc(100% - 48px); min-height: 76px; }
+            #trd-module-nav { position: fixed; inset: 0 auto 0 0; width: 220px; background: #0e1729; border: 0; box-shadow: none; backdrop-filter: none; overflow-y: auto; }
+            #trd-module-nav::before { content: 'TRD · AKRA'; display: flex; align-items: center; min-height: 76px; padding: 0 24px; color: #fff; font-size: 18px; font-weight: 700; border-bottom: 1px solid #253047; }
+            .trd-module-nav__inner { width: 100%; margin: 0; padding: 24px 12px; flex-direction: column; gap: 8px; overflow: visible; }
+            .trd-module-tab { min-height: 48px; border: 0; border-radius: 10px; color: #cbd5e1; gap: 12px; font-size: 14px; }
+            .trd-module-tab:hover { color: #fff; background: #1e293b; }
+            .trd-module-tab.is-active { color: #fff; background: var(--trd-blue); }
+            .trd-module-tab__count { margin-left: auto; }
+            body.trdakra-shell #app-root { margin-left: 220px; width: calc(100% - 220px); min-height: calc(100vh - 76px); }
+            body.trdakra-shell #main-view { min-height: calc(100vh - 76px); }
+            body.trdakra-shell #main-view > div { width: calc(100% - 48px) !important; min-height: calc(100vh - 76px); }
+            body.trdakra-shell #main-view > div > header + div.sticky { top: 76px !important; }
+            body.trdakra-shell #main-view > div > header + div.sticky + div.sticky { top: 134px !important; }
+            body.trdakra-shell #main-view .fixed.bottom-0:not(.trd-modal-sheet) { left: calc(50% + 110px) !important; width: min(720px, calc(100% - 268px)) !important; }
+        }
+        @media (max-width: 767px) {
+            body.trdakra-shell #main-view > div > header { padding: 20px 0; }
+            body.trdakra-shell #main-view > div > header h1 { font-size: 20px; }
+            body.trdakra-shell #main-view > div > main { padding-top: 16px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .trd-topbar, .trd-mobile-menu__panel { transition: none; }
+        }
+        /* Reference-aligned operational surfaces. */
+        body.trdakra-shell { font-size: 14px; line-height: 1.65; letter-spacing: 0; }
+        .trd-overview { padding: 28px 0; }
+        .trd-page-intro { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 24px; }
+        .trd-page-intro h1 { margin: 0; font-size: 24px; line-height: 1.5; font-weight: 700; }
+        .trd-page-intro p { margin: 4px 0 0; color: #64748b; font-size: 13px; }
+        .trd-primary,.trd-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+        .trd-primary { background: #243b83; color: #fff; border: 1px solid #243b83; }
+        .trd-primary:hover { background: #1e3271; }
+        .trd-secondary { background: #fff; border: 1px solid #e2e8f0; color: #334155; }
+        .trd-secondary:hover { background: #eff6ff; border-color: #bfdbfe; }
+        .trd-primary .material-icons-round,.trd-secondary .material-icons-round { font-size: 18px; }
+        .trd-metrics { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; margin-bottom: 24px; }
+        .trd-metric { position: relative; padding: 20px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; min-width: 0; }
+        .trd-metric p { margin: 0 28px 14px 0; color: #475569; font-size: 13px; font-weight: 600; }
+        .trd-metric strong { display: block; font-size: 26px; line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .trd-metric small { display: block; font-size: 12px; color: #64748b; margin-top: 6px; }
+        .trd-metric-icon { position: absolute; top: 20px; right: 18px; font-size: 21px; }
+        .trd-metric-icon.blue { color: #2563eb; }.trd-metric-icon.amber { color: #b45309; }.trd-metric-icon.green { color: #047857; }.trd-metric-icon.violet { color: #7c3aed; }.trd-metric-icon.rose { color: #be123c; }
+        .trd-overview-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 20px; margin-bottom: 24px; }
+        .trd-report-grid { display: grid; grid-template-columns: minmax(0,2fr) minmax(240px,1fr); gap: 20px; }
+        .trd-panel { min-width: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+        .trd-panel-heading { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px; border-bottom: 1px solid #edf0f4; }
+        .trd-panel-heading h2 { font-size: 15px; font-weight: 700; margin: 0; color: #172033; }
+        .trd-panel-heading p,.trd-panel-heading > span { font-size: 12px; color: #64748b; margin: 3px 0 0; }
+        .trd-status-chart { padding: 26px 20px; display: grid; gap: 24px; }
+        .trd-chart-row { display: grid; grid-template-columns: 112px 1fr 24px; align-items: center; gap: 12px; font-size: 13px; color: #475569; }
+        .trd-chart-row strong { color: #172033; text-align: right; font-variant-numeric: tabular-nums; }
+        .trd-bar-track { height: 12px; border-radius: 3px; background: #f1f5f9; overflow: hidden; }
+        .trd-bar { height: 100%; border-radius: 3px; }.trd-bar.amber { background: #d97706; }.trd-bar.blue { background: #2563eb; }.trd-bar.green { background: #059669; }
+        .trd-panel-foot { color: #64748b; font-size: 12px; padding: 0 20px 20px; }
+        .trd-quick-list { padding: 0 20px; }
+        .trd-quick-list button { width: 100%; display: flex; align-items: center; gap: 12px; text-align: left; padding: 12px 0; border-bottom: 1px solid #edf0f4; color: #334155; }
+        .trd-quick-list button:last-child { border: 0; }.trd-quick-list button:hover { color: #1d4ed8; }
+        .trd-quick-list button > span:nth-child(2) { flex: 1; font-size: 13px; font-weight: 600; }
+        .trd-quick-list small { display: block; font-size: 12px; color: #64748b; font-weight: 400; }
+        .trd-quick-list .material-icons-round { font-size: 20px; color: #64748b; }
+        .trd-quick-list b { font-size: 13px; color: #1d4ed8; }
+        .trd-table-wrap { width: 100%; overflow-x: auto; }
+        .trd-data-table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
+        .trd-data-table th { background: #f8fafc; color: #475569; font-weight: 600; white-space: nowrap; padding: 13px 18px; border-bottom: 1px solid #e2e8f0; }
+        .trd-data-table td { padding: 14px 18px; border-bottom: 1px solid #edf0f4; color: #334155; vertical-align: top; font-variant-numeric: tabular-nums; }
+        .trd-data-table tbody tr:last-child td { border: 0; }.trd-data-table tbody tr:hover { background: #fafcff; }
+        .trd-data-table small { display: block; font-size: 12px; font-weight: 400; color: #64748b; margin-top: 3px; }
+        .trd-data-table .trd-product-cell { font-weight: 600; color: #172033; min-width: 180px; }
+        .trd-data-table td:last-child > span { white-space: nowrap; font-size: 11px; font-weight: 600; }
+        .trd-table-empty { padding: 32px 20px !important; text-align: center; color: #64748b; }
+        .trd-ranking > div { display: flex; align-items: center; gap: 12px; margin: 0 20px; padding: 18px 0; border-bottom: 1px solid #edf0f4; }
+        .trd-ranking > div > span { color: #64748b; }.trd-ranking strong { flex: 1; font-size: 13px; }.trd-ranking b { font-size: 13px; color: #243b83; }.trd-ranking small { font-weight: 400; }
+        body.trdakra-shell #main-view .trd-redundant-header { display: none; }
+        body.trdakra-shell #main-view .trd-w1,body.trdakra-shell #main-view .trd-w2,body.trdakra-shell #main-view .trd-report { padding-top: 24px; }
+        body.trdakra-shell #main-view .trd-report > div.sticky,
+        body.trdakra-shell #main-view .trd-w1 > div.sticky,
+        body.trdakra-shell #main-view .trd-w2 > div.sticky { position: static !important; border-radius: 10px; margin-bottom: 12px; }
+        body.trdakra-shell #main-view .trd-report > div.sticky { justify-content: flex-start; }
+        body.trdakra-shell #main-view .trd-report > div.sticky > button { flex: 0 1 auto; flex-direction: row; padding: 14px 20px; gap: 8px; }
+        body.trdakra-shell #main-view .trd-report > div.sticky > button span { font-size: 13px; }
+        body.trdakra-shell #main-view .trd-report > div.sticky > button .material-icons-round { font-size: 18px; }
+        body.trdakra-shell #main-view .trd-report > main { padding-top: 8px; }
+        body.trdakra-shell #main-view .trd-request-form { max-width: 880px; margin: 0 auto; padding: 0; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: none; overflow: hidden; }
+        body.trdakra-shell #main-view .trd-form-heading { padding: 20px 24px; margin: 0; background: #243b83; color: #fff !important; font-size: 17px; }
+        body.trdakra-shell #main-view .trd-form-heading > div > div { display: none; }
+        body.trdakra-shell #main-view .trd-form-heading > span { color: #e0e7ff; font-size: 12px; }
+        .trd-request-form #w1-rows-container { padding: 24px; margin: 0; }
+        body.trdakra-shell #main-view .trd-request-row { padding: 0 0 24px; background: #fff; border: 0; border-bottom: 1px solid #e2e8f0; border-radius: 0; margin: 0 0 24px; }
+        body.trdakra-shell #main-view .trd-request-row:last-child { border: 0; margin-bottom: 0; padding-bottom: 0; }
+        .trd-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .trd-fields > div { margin: 0 !important; min-width: 0; }.trd-fields > div:first-child { grid-column: 1 / -1; }
+        .trd-fields > div:nth-child(2) { grid-column: 1 / -1; }
+        body.trdakra-shell #main-view .trd-location-fields { display: grid; grid-column: 1 / -1; padding: 0; border: 0; border-radius: 0; background: transparent; }
+        body.trdakra-shell #main-view .trd-fields label { margin-left: 0; font-size: 13px; color: #334155 !important; font-weight: 600; }
+        body.trdakra-shell #main-view .trd-fields input,body.trdakra-shell #main-view .trd-fields select { min-height: 42px; border-radius: 7px !important; font-size: 14px; }
+        .trd-request-form > button { width: calc(100% - 48px); margin: 0 24px 20px !important; border-radius: 8px !important; min-height: 44px; font-size: 13px; }
+        body.trdakra-shell #main-view .trd-request-form > button:last-child { width: auto; display: block; margin-left: auto !important; padding: 12px 24px; background: #243b83 !important; }
+        body.trdakra-shell #main-view .trd-w2 > main > .animate-fade-in { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; }
+        body.trdakra-shell #main-view .trd-w2 > main > .animate-fade-in > .space-y-2 { border-top: 1px solid #e2e8f0; }
+        body.trdakra-shell #main-view .trd-w2 > main > .animate-fade-in > .space-y-2 > div { margin: 0; border: 0; border-bottom: 1px solid #e2e8f0; border-radius: 0; }
+        @media (max-width: 1099px) { .trd-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }.trd-report-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 767px) {
+            .trd-overview { padding: 20px 0; }.trd-page-intro { align-items: flex-start; flex-direction: column; gap: 14px; }.trd-page-intro h1 { font-size: 20px; }
+            .trd-page-intro .trd-primary { width: 100%; min-height: 44px; }.trd-metrics { gap: 10px; margin-bottom: 16px; }.trd-metric { padding: 16px; }.trd-metric p { margin-right: 22px; min-height: 40px; font-size: 12px; }.trd-metric strong { font-size: 24px; }.trd-metric-icon { top: 16px; right: 12px; font-size: 18px; }
+            .trd-overview-grid { grid-template-columns: 1fr; gap: 16px; }.trd-panel-heading { padding: 16px; gap: 8px; }.trd-panel-heading h2 { font-size: 14px; }.trd-panel-heading > span { font-size: 11px; }
+            .trd-status-chart { padding: 20px 16px; }.trd-chart-row { grid-template-columns: 100px 1fr 20px; font-size: 12px; gap: 8px; }
+            .trd-data-table { min-width: 620px; }.trd-panel-heading .trd-secondary { padding: 8px; font-size: 12px; }
+            body.trdakra-shell #main-view .trd-report > div.sticky { flex-wrap: wrap; }
+            body.trdakra-shell #main-view .trd-report > div.sticky > button { padding: 12px 10px; }
+            body.trdakra-shell #main-view .trd-report > div.sticky > button span { font-size: 12px; }
+            .trd-request-form #w1-rows-container { padding: 18px; }.trd-fields { grid-template-columns: 1fr; gap: 16px; }
+            body.trdakra-shell #main-view .trd-form-heading { padding: 18px; font-size: 16px; gap: 12px; }.trd-form-heading > span { white-space: nowrap; }
+            .trd-request-form > button { width: calc(100% - 36px); margin: 0 18px 18px !important; }
+            body.trdakra-shell #main-view .trd-request-form > button:last-child { width: calc(100% - 36px); margin: 0 18px 18px !important; }
+            body.trdakra-shell #main-view .trd-w2 > main > .animate-fade-in { padding: 12px; }
+        }
+
+        .trd-storefront-tabs { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; margin: 16px 0 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; }
+        .trd-storefront-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 14px; min-height: 44px; border-radius: 7px; color: #475569; font-size: 13px; font-weight: 600; }
+        .trd-storefront-tabs button:hover { background: #f1f5f9; }
+        .trd-storefront-tabs button.is-active { color: #fff; background: #243b83; }
+        .trd-storefront-tabs .material-icons-round { font-size: 18px; }
+        .trd-storefront-count { color: #7c3aed; background: #f3e8ff; padding: 0 6px; border-radius: 8px; font-size: 11px; }
+        @media(max-width: 767px) { .trd-storefront-tabs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; padding: 8px; }.trd-storefront-tabs button { padding: 9px 8px; font-size: 12px; } }
     </style>
 </head>
 <body class="trdakra-shell">
@@ -500,7 +659,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260915.01";
+        const CURRENT_VERSION = "20260915.04";
         const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
 
         const SUPABASE_CONFIG = {
@@ -3177,8 +3336,8 @@
             ];
 
             return `
-                <div class="w-full ${state.dashboardTab === 'product' ? 'max-w-6xl' : 'max-w-md'} bg-[#f8fafc] min-h-screen flex flex-col relative animate-fade-in">
-                    <header class="bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
+                <div class="trd-report w-full ${state.dashboardTab === 'product' ? 'max-w-6xl' : 'max-w-md'} bg-[#f8fafc] min-h-screen flex flex-col relative animate-fade-in">
+                    <header class="trd-redundant-header bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
                         <div class="flex items-center gap-2">
                             <button onclick="setView('home')" aria-label="กลับหน้าหลัก" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white">
                                 <span class="material-icons-round">arrow_back</span>
@@ -3247,7 +3406,6 @@
             }).length;
 
             const fulfillmentRate = totalRequestQty > 0 ? Math.round((totalQty / totalRequestQty) * 100) : 100;
-            const fulfillBg = fulfillmentRate >= 90 ? 'bg-emerald-500 shadow-emerald-500/20' : fulfillmentRate >= 70 ? 'bg-amber-500 shadow-amber-500/20' : 'bg-rose-500 shadow-rose-500/20';
 
             const topItems = Object.keys(itemStats).map(k => ({
                 name: k, count: itemStats[k].count, qty: itemStats[k].qty, capacity: itemStats[k].capacity
@@ -3258,111 +3416,22 @@
                 .map(([name, count]) => ({ name, count }));
 
             return `
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="bg-brand-blue p-4 rounded-[1.5rem] shadow-lg shadow-brand-blue/20 text-white relative overflow-hidden">
-                        <span class="material-icons-round absolute -right-2 -bottom-2 text-[60px] opacity-10">inventory</span>
-                        <p class="text-[11px] font-semibold text-white/80 uppercase tracking-wider mb-1">ยอดจัดส่งรวม</p>
-                        <p class="text-2xl font-bold">${totalQty.toLocaleString()} <span class="text-xs font-medium text-white/80">ชิ้น</span></p>
-                    </div>
-                    <div class="bg-brand-orange p-4 rounded-[1.5rem] shadow-lg shadow-brand-orange/20 text-white relative overflow-hidden">
-                        <span class="material-icons-round absolute -right-2 -bottom-2 text-[60px] opacity-10">receipt_long</span>
-                        <p class="text-[11px] font-semibold text-white/80 uppercase tracking-wider mb-1">จำนวนบิลเบิก</p>
-                        <p class="text-2xl font-bold">${dispatchedItems.length.toLocaleString()} <span class="text-xs font-medium text-white/80">รายการ</span></p>
-                    </div>
-                    <div class="${fulfillBg} p-4 rounded-[1.5rem] shadow-lg text-white relative overflow-hidden">
-                        <span class="material-icons-round absolute -right-2 -bottom-2 text-[60px] opacity-10">task_alt</span>
-                        <p class="text-[11px] font-semibold text-white/80 uppercase tracking-wider mb-1">Fulfillment Rate</p>
-                        <p class="text-2xl font-bold">${fulfillmentRate}<span class="text-xs font-medium text-white/80">%</span></p>
-                    </div>
-                    <div class="bg-rose-500 p-4 rounded-[1.5rem] shadow-lg shadow-rose-500/20 text-white relative overflow-hidden">
-                        <span class="material-icons-round absolute -right-2 -bottom-2 text-[60px] opacity-10">error_outline</span>
-                        <p class="text-[11px] font-semibold text-white/80 uppercase tracking-wider mb-1">หมด/ยกเลิก</p>
-                        <p class="text-2xl font-bold">${problemCount} <span class="text-xs font-medium text-white/80">รายการ</span></p>
-                    </div>
+                ${renderEnterpriseMetrics([
+                    {label:'ยอดจัดส่งรวม',value:totalQty.toLocaleString(),detail:'ชิ้น',icon:'inventory_2',tone:'blue'},
+                    {label:'จำนวนบิลเบิก',value:dispatchedItems.length.toLocaleString(),detail:'รายการ',icon:'receipt_long',tone:'violet'},
+                    {label:'Fulfillment Rate',value:fulfillmentRate+'%',detail:'รับจริงเทียบกับยอดเบิก',icon:'task_alt',tone:fulfillmentRate>=90?'green':'amber'},
+                    {label:'หมด / ยกเลิก',value:problemCount,detail:'รายการในช่วงที่เลือก',icon:'error_outline',tone:'rose'}
+                ])}
+                <div class="trd-report-grid">
+                    <section class="trd-panel"><div class="trd-panel-heading"><h2>สรุปสินค้าที่เบิกสูงสุด</h2><span>10 อันดับแรก</span></div>
+                        <div class="trd-table-wrap"><table class="trd-data-table"><thead><tr><th>สินค้า</th><th>รับจริง</th><th>บิลเบิก</th><th>วิเคราะห์การเบิก</th></tr></thead><tbody>
+                        ${topItems.length ? topItems.map(item=>{const insight=getInsightDetails(item.name,item.qty,item.count,item.capacity); return `<tr><td class="trd-product-cell">${esc(item.name)}</td><td>${item.qty.toLocaleString()}</td><td>${item.count}</td><td><strong>${esc(insight.title)}</strong><small>${esc(insight.desc)}</small></td></tr>`;}).join('') : '<tr><td colspan="4" class="trd-table-empty">ไม่มีข้อมูลในช่วงเวลานี้</td></tr>'}
+                        </tbody></table></div></section>
+                    <section class="trd-panel"><div class="trd-panel-heading"><h2>ผู้ขอเบิกสูงสุด</h2><span>3 อันดับแรก</span></div><div class="trd-ranking">
+                        ${topRequesters.length ? topRequesters.map((r,i)=>`<div><span>${i+1}</span><strong>${esc(r.name)}</strong><b>${r.count} <small>บิล</small></b></div>`).join('') : '<p class="trd-table-empty">ไม่มีข้อมูลผู้ขอเบิกในช่วงนี้</p>'}
+                    </div></section>
                 </div>
-
-                ${topRequesters.length > 0 ? `
-                <div>
-                    <h3 class="text-sm font-bold text-brand-blue mb-3 flex items-center gap-2 px-1">
-                        <span class="material-icons-round text-brand-orange text-[18px]">emoji_people</span> ผู้ขอเบิกสูงสุด
-                    </h3>
-                    <div class="bg-white rounded-[1.5rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100 divide-y divide-slate-50">
-                        ${topRequesters.map(r => `
-                            <div class="flex items-center gap-3 p-3">
-                                <div class="w-8 h-8 rounded-full bg-brand-blue/10 text-brand-blue flex items-center justify-center font-bold text-xs flex-shrink-0">
-                                    ${esc(r.name.charAt(0).toUpperCase())}
-                                </div>
-                                <span class="text-sm font-semibold text-slate-700 flex-1 truncate">${esc(r.name)}</span>
-                                <span class="text-xs font-bold text-brand-orange bg-brand-orange/10 px-2 py-0.5 rounded-lg">${r.count} บิล</span>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-                ` : ''}
-
-                <div>
-                    <h3 class="text-sm font-bold text-brand-blue mb-3 flex items-center gap-2 px-1">
-                        <span class="material-icons-round text-brand-orange text-[18px]">lightbulb</span> วิเคราะห์พฤติกรรมการเบิก (Insights)
-                    </h3>
-                    ${topItems.length === 0 ? renderEmptyState('ไม่มีข้อมูลในช่วงเวลานี้', 'analytics') : `
-                        <div class="space-y-4">
-                            ${topItems.map((item, idx) => {
-                                const insight = getInsightDetails(item.name, item.qty, item.count, item.capacity);
-                                return `
-                                    <div class="bg-white p-4 rounded-[1.5rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100">
-                                        <div class="flex justify-between items-start mb-3">
-                                            <div class="flex-1 pr-3">
-                                                <span class="text-[10px] font-bold text-slate-400">อันดับ ${idx + 1}</span>
-                                                <h4 class="font-bold text-brand-blue text-[15px] leading-tight mt-0.5">${esc(item.name)}</h4>
-                                            </div>
-                                            <div class="text-right">
-                                                <p class="font-bold text-brand-orange text-lg leading-none">${item.qty.toLocaleString()} <span class="text-[10px] font-medium text-brand-orange/80">ชิ้น</span></p>
-                                                <p class="text-[10px] text-slate-400 font-medium mt-1">${item.count} บิลสั่งเบิก</p>
-                                            </div>
-                                        </div>
-                                        <div class="${insight.bg} ${insight.border} border p-3 rounded-xl flex gap-3 items-start mt-2">
-                                            <span class="material-icons-round ${insight.color} text-[18px] mt-0.5">${insight.icon}</span>
-                                            <div>
-                                                <p class="text-xs font-bold ${insight.color} mb-0.5">${insight.title}</p>
-                                                <p class="text-[10px] text-slate-600 leading-snug">${insight.desc}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                `;
-                            }).join('')}
-                        </div>
-                    `}
-                </div>
-
-                <div>
-                    <h3 class="text-sm font-bold text-brand-blue mb-3 flex items-center gap-2 px-1">
-                        <span class="material-icons-round text-brand-orange text-[18px]">history</span> รายการบิลเบิกย้ายล่าสุด
-                    </h3>
-                    ${dispatchedItems.length === 0 ? renderEmptyState('ไม่มีบิลจัดส่ง', 'receipt') : `
-                        <div class="bg-white rounded-[1.5rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100 overflow-hidden">
-                            ${dispatchedItems.slice(0, 20).map(bill => `
-                                <div class="p-4 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
-                                    <div class="flex justify-between items-center mb-1.5 flex-wrap gap-1">
-                                        <span class="text-[10px] font-mono font-semibold text-brand-blue bg-brand-blue/10 px-2 py-0.5 rounded">${bill.id}</span>
-                                        <div class="text-[9px] text-slate-400 flex items-center gap-2 flex-wrap">
-                                            <span class="inline-flex items-center gap-0.5"><span class="material-icons-round text-[11px]">event_note</span>เบิก: ${bill.timestamp.split(' / ')[0]}</span>
-                                            ${bill.dispatchTimestamp ? `<span class="inline-flex items-center gap-0.5"><span class="material-icons-round text-[11px] text-emerald-500">local_shipping</span>จัดส่ง: ${bill.dispatchTimestamp.split(' / ')[0]}</span>` : ''}
-                                        </div>
-                                    </div>
-                                    <p class="text-sm font-bold text-slate-800 mb-1 truncate">${esc(bill.itemName)}</p>
-                                    <div class="flex justify-between items-end">
-                                        <div class="text-[10px] text-slate-500 flex items-center gap-1 mt-1">
-                                            <span class="material-icons-round text-[12px] text-slate-400">inventory_2</span>
-                                            ความจุ: <span class="font-medium text-slate-700">${bill.storageCapacity || 0} ชิ้น</span>
-                                        </div>
-                                        <span class="text-xs font-bold text-brand-orange bg-brand-orange/10 px-2 py-1 rounded-lg">รับ ${getActualReceivedQty(bill)} ชิ้น</span>
-                                    </div>
-                                </div>
-                            `).join('')}
-                            ${dispatchedItems.length > 20 ? `<div class="p-3 text-center text-[10px] text-slate-400 bg-slate-50 border-t border-slate-100">แสดงข้อมูล 20 รายการล่าสุด</div>` : ''}
-                        </div>
-                    `}
-                </div>
+                <section class="trd-panel"><div class="trd-panel-heading"><div><h2>ทะเบียนรายการเบิกจ่าย</h2><p>รายการจัดส่งในช่วงที่เลือก · แสดงสูงสุด 20 รายการล่าสุด</p></div></div>${renderRequestTable(dispatchedItems,true)}</section>
             `;
         }
 
@@ -4858,169 +4927,71 @@
         }
 
         // --- Render Screens ---
+        function renderEnterpriseMetrics(metrics) {
+            return `<div class="trd-metrics">${metrics.map(m => `<div class="trd-metric">
+                <span class="material-icons-round trd-metric-icon ${m.tone || ''}" aria-hidden="true">${m.icon}</span>
+                <p>${esc(m.label)}</p><strong>${esc(m.value)}</strong><small>${esc(m.detail)}</small>
+            </div>`).join('')}</div>`;
+        }
+
+        function renderRequestTable(items, received = false) {
+            const ordered = items.slice().sort((a,b) => (Date.parse(b.rawDate) || 0) - (Date.parse(a.rawDate) || 0)).slice(0,20);
+            return `<div class="trd-table-wrap"><table class="trd-data-table"><thead><tr>
+                <th>เลขที่รายการ / วันที่</th><th>สินค้า</th><th>ผู้ขอเบิก</th><th>${received ? 'รับจริง' : 'จำนวนเบิก'}</th><th>สถานะ</th>
+                </tr></thead><tbody>${ordered.length ? ordered.map(item => {
+                    const date = new Date(item.rawDate || '');
+                    const dateText = Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString('th-TH');
+                    return `<tr><td>${esc(item.id)}<small>${esc(dateText)}</small></td>
+                        <td class="trd-product-cell">${esc(item.itemName)}</td><td>${esc(item.requestedBy || '—')}</td>
+                        <td>${esc(received ? getActualReceivedQty(item) : item.requestQty)} <small>${esc(getProductUnitClient(item.itemName))}</small></td>
+                        <td>${getStatusBadge(item.status)}</td></tr>`;
+                }).join('') : '<tr><td colspan="5" class="trd-table-empty">ไม่มีรายการในช่วงเวลานี้</td></tr>'}</tbody></table></div>`;
+        }
+
         function renderHome() {
-            const missingCount  = state.products.filter(p => !p.floor).length;
-            const pendingW1     = state.items.filter(i => ACTIVE_W1_STATUSES.includes(i.status)).length;
-            const totalProducts = state.products.length;
-            const now = new Date();
-            const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-            const dateStr = now.toLocaleDateString('th-TH', { weekday:'long', day:'numeric', month:'long' });
-
-            // ── Desktop grid layout ──
-            const desktopCards = [
-                {
-                    onclick: "setView('w1')",
-                    icon: 'storefront',
-                    color: 'bg-brand-blue',
-                    shadow: 'shadow-brand-blue/20',
-                    title: 'TRD',
-                    subtitle: 'พนักงานหน้าร้าน',
-                    desc: 'สร้างใบเบิกสินค้า ติดตามสถานะ',
-                    badge: pendingW1 > 0 ? `<span class="inline-flex items-center gap-1 bg-amber-100 text-amber-700 text-xs font-bold px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>รอจัด ${pendingW1}</span>` : `<span class="text-xs text-slate-400">ไม่มีรายการค้าง</span>`,
-                },
-                {
-                    onclick: "setView('w2')",
-                    icon: 'warehouse',
-                    color: 'bg-brand-blue',
-                    shadow: 'shadow-brand-blue/20',
-                    title: 'AKRA',
-                    subtitle: 'พนักงานคลังสินค้า',
-                    desc: 'จัดและยืนยันการส่งสินค้า',
-                    badge: `<span class="text-xs text-slate-400">สินค้า ${totalProducts} รายการ</span>`,
-                },
-                {
-                    onclick: "setView('check_stock')",
-                    icon: 'fact_check',
-                    color: 'bg-emerald-600',
-                    shadow: 'shadow-emerald-600/20',
-                    title: 'สำรวจสต็อก',
-                    subtitle: 'Check Stock',
-                    desc: 'ตรวจนับสินค้าหน้าร้านตามโลเคชั่น',
-                    badge: `<span class="text-xs text-slate-400">รีเซ็ตทุก 18:00 น.</span>`,
-                },
-                {
-                    onclick: "setView('location')",
-                    icon: 'place',
-                    color: 'bg-indigo-600',
-                    shadow: 'shadow-indigo-600/20',
-                    title: 'จัดโลเคชั่น',
-                    subtitle: 'Location Manager',
-                    desc: 'กำหนดพิกัด W1-2F-2B ให้สินค้า',
-                    badge: missingCount > 0
-                        ? `<span class="inline-flex items-center gap-1 bg-rose-100 text-rose-600 text-xs font-bold px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 bg-rose-500 rounded-full"></span>ยังไม่มีพิกัด ${missingCount}</span>`
-                        : `<span class="inline-flex items-center gap-1 bg-emerald-100 text-emerald-700 text-xs font-bold px-2.5 py-1 rounded-full">จัดครบแล้ว</span>`,
-                },
-                {
-                    onclick: "setView('dashboard')",
-                    icon: 'bar_chart',
-                    color: 'bg-brand-orange',
-                    shadow: 'shadow-brand-orange/20',
-                    title: 'Analytics',
-                    subtitle: 'วิเคราะห์ข้อมูล',
-                    desc: 'สรุปยอด trend สำรวจสต็อก',
-                    badge: `<span class="text-xs text-slate-400">เดือนนี้ · สัปดาห์นี้</span>`,
-                },
+            const pending = state.items.filter(i => i.status === 'สั่งเบิก').length;
+            const preparing = state.items.filter(i => i.status === 'กำลังจัดสินค้า').length;
+            const receiving = state.items.filter(i => i.status === 'รอตรวจรับ').length;
+            const missing = state.products.filter(p => !p.floor).length;
+            const statuses = [
+                {label:'สั่งเบิก', count:pending, tone:'amber'},
+                {label:'กำลังจัดสินค้า', count:preparing, tone:'blue'},
+                {label:'รอตรวจรับ', count:receiving, tone:'green'}
             ];
-
-            return `
-                <div class="w-full min-h-screen">
-
-                    <!-- ── Mobile layout (hidden on desktop) ── -->
-                    <div class="trd-home-mobile md:hidden w-full max-w-sm flex flex-col items-center justify-center p-5 mx-auto relative min-h-screen">
-                        <div class="absolute top-6 right-6 bg-white/90 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-sm border border-slate-100 flex items-center gap-1.5 text-xs font-semibold text-brand-blue z-10 tracking-wide">
-                            <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
-                            ${esc(currentUser)}
-                        </div>
-                        <div class="trd-home-menu bg-white p-10 rounded-[2.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.06)] w-full text-center border border-slate-50 mt-6">
-                            <div class="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 bg-brand-blue/10 text-brand-blue shadow-inner">
-                                <span class="material-icons-round" style="font-size: 36px;">local_shipping</span>
-                            </div>
-                            <h1 class="text-2xl font-bold text-brand-blue mb-2">ระบบเบิกจ่ายสินค้า</h1>
-                            <p class="text-slate-400 mb-8 text-xs tracking-wide">เลือกระบบที่คุณต้องการเข้าใช้งาน</p>
-                            <div class="space-y-4">
-                                <button onclick="setView('w1')" class="w-full bg-brand-blue text-white p-4 rounded-2xl font-medium flex items-center justify-center gap-3 transition-all shadow-[0_6px_20px_rgba(23,28,143,0.25)] active:scale-[0.98]"><span class="material-icons-round text-white/70">storefront</span> พนักงานหน้าร้าน (TRD)</button>
-                                <button onclick="setView('w2')" class="w-full bg-brand-blue text-white p-4 rounded-2xl font-medium flex items-center justify-center gap-3 transition-all shadow-[0_6px_20px_rgba(23,28,143,0.25)] active:scale-[0.98]"><span class="material-icons-round text-white/70">warehouse</span> พนักงานคลังสินค้า (AKRA)</button>
-                                <button onclick="setView('check_stock')" class="w-full bg-emerald-600 text-white p-4 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all shadow-[0_6px_20px_rgba(5,150,105,0.25)] active:scale-[0.98]"><span class="material-icons-round">fact_check</span> สำรวจสต๊อกหน้าร้าน</button>
-                                <button onclick="setView('location')" class="w-full bg-indigo-600 text-white p-4 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_6px_20px_rgba(99,102,241,0.25)]"><span class="material-icons-round">place</span> จัดโลเคชั่นสินค้า${missingCount > 0 ? `<span class="ml-auto bg-white/25 text-white text-xs font-bold px-2.5 py-0.5 rounded-full">${missingCount}</span>` : ''}</button>
-                                <hr class="border-slate-100 my-2">
-                                <button onclick="setView('dashboard')" class="w-full bg-brand-orange text-white p-4 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_6px_20px_rgba(227,82,5,0.25)]"><span class="material-icons-round">insights</span> วิเคราะห์ข้อมูล</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- ── Desktop layout (hidden on mobile) ── -->
-                    <div class="hidden md:block w-full min-h-screen bg-slate-100">
-                        <!-- Top header bar -->
-                        <div class="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between">
-                            <div>
-                                <h1 class="text-xl font-bold text-slate-800">สวัสดี, ${esc(currentUser)} 👋</h1>
-                                <p class="text-sm text-slate-400 mt-0.5">${dateStr}</p>
-                            </div>
-                            <div class="flex items-center gap-3">
-                                <div class="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 px-3.5 py-1.5 rounded-full text-xs font-bold">
-                                    <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                                    Online · ${timeStr}
-                                </div>
-                                <div class="text-xs text-slate-400 bg-slate-100 px-3 py-1.5 rounded-full font-mono">v${CURRENT_VERSION}</div>
-                            </div>
-                        </div>
-
-                        <!-- Stats strip -->
-                        <div class="trd-home-stats px-8 pt-6 pb-2 grid grid-cols-4 gap-4">
-                            ${[
-                                { label: 'รายการค้าง (W1)', value: pendingW1, icon: 'pending_actions', color: pendingW1 > 0 ? 'text-amber-600 bg-amber-50' : 'text-slate-500 bg-slate-100' },
-                                { label: 'สินค้าทั้งหมด', value: totalProducts, icon: 'inventory_2', color: 'text-brand-blue bg-blue-50' },
-                                { label: 'ยังไม่มีพิกัด', value: missingCount, icon: 'location_off', color: missingCount > 0 ? 'text-rose-600 bg-rose-50' : 'text-emerald-600 bg-emerald-50' },
-                                { label: 'พร้อมสำรวจ', value: totalProducts - missingCount, icon: 'check_circle', color: 'text-emerald-600 bg-emerald-50' },
-                            ].map(s => `
-                                <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex items-center gap-4">
-                                    <div class="w-12 h-12 rounded-xl flex items-center justify-center ${s.color}">
-                                        <span class="material-icons-round text-[22px]">${s.icon}</span>
-                                    </div>
-                                    <div>
-                                        <p class="text-2xl font-bold text-slate-800">${s.value}</p>
-                                        <p class="text-xs text-slate-400 mt-0.5">${s.label}</p>
-                                    </div>
-                                </div>
-                            `).join('')}
-                        </div>
-
-                        <!-- Action cards grid -->
-                        <div class="px-8 py-5">
-                            <h2 class="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">เมนูหลัก</h2>
-                            <div class="grid grid-cols-3 gap-4">
-                                ${desktopCards.map(card => `
-                                    <button onclick="${card.onclick}"
-                                            class="group bg-white rounded-2xl border border-slate-200 shadow-sm p-6 text-left hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 active:scale-[0.98] flex flex-col gap-4">
-                                        <div class="flex items-start justify-between">
-                                            <div class="w-14 h-14 rounded-2xl ${card.color} shadow-lg ${card.shadow} flex items-center justify-center group-hover:scale-110 transition-transform">
-                                                <span class="material-icons-round text-white text-[26px]">${card.icon}</span>
-                                            </div>
-                                            ${card.badge}
-                                        </div>
-                                        <div>
-                                            <p class="text-[15px] font-bold text-slate-800 leading-tight">${card.title}</p>
-                                            <p class="text-xs font-medium text-slate-400 mt-0.5">${card.subtitle}</p>
-                                            <p class="text-xs text-slate-500 mt-2 leading-relaxed">${card.desc}</p>
-                                        </div>
-                                        <div class="flex items-center gap-1 text-xs font-semibold text-brand-blue opacity-0 group-hover:opacity-100 transition-opacity">
-                                            เข้าใช้งาน <span class="material-icons-round text-[14px]">arrow_forward</span>
-                                        </div>
-                                    </button>
-                                `).join('')}
-                            </div>
-                        </div>
-                    </div>
+            const maxCount = Math.max(1,...statuses.map(v=>v.count));
+            return `<div class="trd-overview">
+                <section class="trd-page-intro"><div><h1>ภาพรวมงานเบิกจ่ายสินค้า</h1><p>ติดตามงานจัดส่ง ตรวจรับ และความพร้อมของโลเคชั่น</p></div>
+                    <button class="trd-primary" onclick="setView('check_stock')"><span class="material-icons-round">fact_check</span> สำรวจสต็อก</button></section>
+                ${renderEnterpriseMetrics([
+                    {label:'รอจัดสินค้า',value:pending,detail:'รายการสั่งเบิก',icon:'pending_actions',tone:'amber'},
+                    {label:'กำลังจัดสินค้า',value:preparing,detail:'รายการที่อยู่ระหว่างจัด',icon:'local_shipping',tone:'blue'},
+                    {label:'รอตรวจรับ',value:receiving,detail:'รายการที่ส่งถึงหน้าร้าน',icon:'fact_check',tone:'green'},
+                    {label:'ยังไม่มีโลเคชั่น',value:missing,detail:'จากสินค้า '+state.products.length+' รายการ',icon:'location_off',tone:'violet'}
+                ])}
+                <div class="trd-overview-grid">
+                    <section class="trd-panel"><div class="trd-panel-heading"><h2>สถานะงานที่ต้องดำเนินการ</h2><span>จำนวนรายการ</span></div>
+                        <div class="trd-status-chart">${statuses.map(v=>`<div class="trd-chart-row"><span>${v.label}</span><div class="trd-bar-track"><div class="trd-bar ${v.tone}" style="width:${v.count/maxCount*100}%"></div></div><strong>${v.count}</strong></div>`).join('')}</div>
+                        <div class="trd-panel-foot">สรุปจากรายการที่แสดงอยู่ในระบบ</div></section>
+                    <section class="trd-panel"><div class="trd-panel-heading"><h2>งานคลังและหน้าร้าน</h2><span>เข้าใช้งาน</span></div>
+                        <div class="trd-quick-list">
+                            <button onclick="setView('w2'); setW2Tab('tasks')"><span class="material-icons-round">local_shipping</span><span>จัดส่งสินค้า <small>งานสำหรับคลัง AKRA</small></span><b>${pending+preparing}</b><span class="material-icons-round">chevron_right</span></button>
+                            <button onclick="setView('w1'); setW1Tab('pending')"><span class="material-icons-round">fact_check</span><span>ตรวจรับสินค้า <small>รายการสำหรับหน้าร้าน TRD</small></span><b>${receiving}</b><span class="material-icons-round">chevron_right</span></button>
+                            <button onclick="setView('check_stock')"><span class="material-icons-round">inventory_2</span><span>สำรวจสต็อก <small>ตรวจนับสินค้าตามโซน</small></span><span class="material-icons-round">chevron_right</span></button>
+                            <button onclick="setView('location')"><span class="material-icons-round">place</span><span>จัดโลเคชั่นสินค้า <small>กำหนดชั้นและตำแหน่งจัดเก็บ</small></span><span class="material-icons-round">chevron_right</span></button>
+                        </div></section>
                 </div>
-            `;
+                <section class="trd-panel"><div class="trd-panel-heading"><div><h2>รายการเบิกจ่ายล่าสุด</h2><p>แสดงสูงสุด 20 รายการ เรียงจากวันเบิกล่าสุด</p></div><button class="trd-secondary" onclick="setView('dashboard')">ดูรายงาน <span class="material-icons-round">arrow_forward</span></button></div>
+                    ${renderRequestTable(state.items)}
+                </section>
+            </div>`;
         }
 
         function renderW1() {
             let content = '';
             if (state.w1Tab === 'request') {
                 content = `
-                    <div class="bg-white p-6 rounded-[2rem] shadow-[0_4px_24px_rgb(0,0,0,0.03)] border border-slate-50 space-y-5 animate-fade-in">
-                        <h2 class="text-lg font-bold text-brand-blue flex justify-between items-center mb-6">
+                    <div class="trd-request-form bg-white p-6 rounded-[2rem] shadow-[0_4px_24px_rgb(0,0,0,0.03)] border border-slate-50 space-y-5 animate-fade-in">
+                        <h2 class="trd-form-heading text-lg font-bold text-brand-blue flex justify-between items-center mb-6">
                             <div class="flex items-center gap-2">
                                 <div class="bg-brand-blue/10 text-brand-blue p-1.5 rounded-full flex items-center justify-center"><span class="material-icons-round text-[20px]">add</span></div>
                                 สร้างรายการเบิก (TRD)
@@ -5030,14 +5001,14 @@
                         
                         <div id="w1-rows-container" class="space-y-6">
                             ${state.w1Rows.map((row, index) => `
-                                <div class="p-4 rounded-2xl bg-slate-50/50 border border-slate-100 relative">
+                                <div class="trd-request-row p-4 rounded-2xl bg-slate-50/50 border border-slate-100 relative">
                                     ${index > 0 ? `
                                         <button onclick="removeW1Row(${index})" class="absolute -top-2 -right-2 bg-rose-500 text-white p-1 rounded-full shadow-md hover:bg-rose-600 transition-colors">
                                             <span class="material-icons-round text-sm">close</span>
                                         </button>
                                     ` : ''}
 
-                                    <div class="space-y-4">
+                                    <div class="trd-fields space-y-4">
                                         <div>
                                             <label class="block text-[10px] font-bold text-brand-blue uppercase tracking-wider mb-1.5 ml-1">ชื่อสินค้า #${index + 1}</label>
                                             <div class="relative">
@@ -5063,7 +5034,7 @@
                                             </div>
                                         </div>
 
-                                        <div class="grid grid-cols-2 gap-3 p-3 bg-emerald-50/60 rounded-xl border border-emerald-100">
+                                        <div class="trd-location-fields grid grid-cols-2 gap-3 p-3 bg-emerald-50/60 rounded-xl border border-emerald-100">
                                             <div>
                                                 <label class="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-1.5 ml-1">📍 ชั้น</label>
                                                 <select onchange="updateW1RowValue(${index}, 'floor', this.value)"
@@ -5228,22 +5199,15 @@
             } else if (state.w1Tab === 'history') { content = renderHistoryList('w1'); }
 
             return `
-                <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative">
-                    <header class="bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
+                <div class="trd-w1 w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative">
+                    <header class="trd-redundant-header bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
                         <div class="flex items-center gap-2"><button onclick="setView('home')" aria-label="กลับหน้าหลัก" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button><h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">storefront</span> หน้าร้าน (TRD)</h1></div>
                         <div class="flex items-center gap-2">
                             <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white" title="รีเฟรชข้อมูล"><span class="material-icons-round text-[20px]">refresh</span></button>
                             <div class="text-[10px] font-semibold tracking-wide bg-black/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-white/10"><span class="material-icons-round text-[14px]">account_circle</span> ${esc(currentUser || 'Demo')}</div>
                         </div>
                     </header>
-                    <div class="flex bg-white shadow-sm sticky top-[60px] z-10 border-b border-slate-100 px-2">
-                        <button onclick="setW1Tab('request')" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] transition-all ${state.w1Tab === 'request' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400 hover:text-slate-600'}">เบิกสินค้า</button>
-                        <button onclick="setW1Tab('pending')" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] relative transition-all ${state.w1Tab === 'pending' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400 hover:text-slate-600'}">รอรับ</button>
-                        <button onclick="setW1Tab('history')" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] transition-all ${state.w1Tab === 'history' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-slate-400 hover:text-slate-600'}">ประวัติ</button>
-                        <button onclick="setView('check_stock')" class="flex-1 py-3.5 text-[13px] font-semibold border-b-[2px] transition-all border-transparent text-emerald-500 hover:text-emerald-700 flex items-center justify-center gap-0.5">
-                            <span class="material-icons-round text-[14px]">fact_check</span>สำรวจ
-                        </button>
-                    </div>
+                    ${renderStorefrontTabs()}
                     <main class="flex-1 overflow-y-auto p-5 pb-24">${content}</main>
                 </div>`;
         }
@@ -5501,8 +5465,8 @@
             }
 
             return `
-                <div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative">
-                    <header class="bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
+                <div class="trd-w2 w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative">
+                    <header class="trd-redundant-header bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
                         <div class="flex items-center gap-2">
                             <button onclick="setView('home')" aria-label="กลับหน้าหลัก" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button>
                             <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">warehouse</span> คลังสินค้า (AKRA)</h1>
@@ -6334,6 +6298,17 @@
                 </div>`;
         }
 
+        function renderStorefrontTabs() {
+            const survey = state.view === 'check_stock';
+            const waiting = state.items.filter(item => item.status === 'รอตรวจรับ').length;
+            return `<nav class="trd-storefront-tabs" aria-label="งานสำรวจและเบิกสินค้า">
+                <button class="${survey ? 'is-active' : ''}" aria-current="${survey ? 'page' : 'false'}" onclick="setView('check_stock')"><span class="material-icons-round">fact_check</span> สำรวจสต็อก</button>
+                <button class="${!survey && state.w1Tab === 'request' ? 'is-active' : ''}" aria-current="${!survey && state.w1Tab === 'request' ? 'page' : 'false'}" onclick="setView('w1'); setW1Tab('request')"><span class="material-icons-round">add</span> เบิกสินค้า</button>
+                <button class="${!survey && state.w1Tab === 'pending' ? 'is-active' : ''}" onclick="setView('w1'); setW1Tab('pending')">รอตรวจรับ${waiting ? ` <span class="trd-storefront-count">${waiting}</span>` : ''}</button>
+                <button class="${!survey && state.w1Tab === 'history' ? 'is-active' : ''}" onclick="setView('w1'); setW1Tab('history')">ประวัติ</button>
+            </nav>`;
+        }
+
         function renderCheckStock() {
             if (!state.checkStockLocation) {
                 // ─── 1. หน้าเลือกโลเคชั่น (เลือกกล่องตามแมพปิ้ง) ───
@@ -6410,6 +6385,7 @@
                                 <span class="material-icons-round text-[20px]">refresh</span>
                             </button>
                         </header>
+                        ${renderStorefrontTabs()}
                         <main class="flex-1 overflow-y-auto p-5 pb-24 space-y-4 animate-fade-in">
                             <div class="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex items-start gap-3 shadow-sm">
                                 <span class="material-icons-round text-indigo-600 mt-0.5">info</span>
@@ -6636,11 +6612,10 @@
             const pendingW1 = state.items.filter(i => ACTIVE_W1_STATUSES.includes(i.status)).length;
             const navItems = [
                 { view: 'home', icon: 'home', label: 'หน้าหลัก' },
-                { view: 'w1', icon: 'shopping_cart', label: 'เบิกสินค้า', count: pendingW1 },
+                { view: 'check_stock', icon: 'fact_check', label: 'สำรวจสต็อก', count: pendingW1 },
                 { view: 'w2', icon: 'local_shipping', label: 'จัดส่งสินค้า' },
                 { view: 'dashboard', icon: 'bar_chart', label: 'Analytics' },
                 { view: 'location', icon: 'place', label: 'จัดโลเคชั่น' },
-                { view: 'check_stock', icon: 'inventory_2', label: 'ตรวจสต็อก' }
             ];
             const topbar = document.getElementById('trd-topbar');
             const moduleNav = document.getElementById('trd-module-nav');
@@ -6649,19 +6624,19 @@
                     <div class="trd-topbar__inner">
                         <div class="trd-topbar__brand">
                             <div class="trd-topbar__app-icon" aria-hidden="true"><span class="material-icons-round">warehouse</span></div>
-                            <div class="trd-topbar__title"><strong>TRD · AKRA</strong><span>ระบบเบิกจ่ายสินค้า</span></div>
+                            <div class="trd-topbar__title"><strong>${esc((state.view === 'w1' ? (state.w1Tab === 'request' ? 'เบิกสินค้า' : state.w1Tab === 'pending' ? 'รอตรวจรับสินค้า' : 'ประวัติการเบิก') : navItems.find(item => item.view === state.view)?.label) || 'TRD · AKRA')}</strong><span>ระบบเบิกจ่ายสินค้า TRD · AKRA</span></div>
                         </div>
                         <div class="trd-topbar__actions">
                             <div class="trd-topbar__user"><span class="material-icons-round text-[16px]">account_circle</span><span>${esc(username)}</span></div>
                             <button type="button" id="trd-mobile-menu-trigger" class="trd-topbar__action trd-mobile-menu-trigger" onclick="toggleMobileMenu()" title="เปิดเมนู" aria-label="เปิดเมนู" aria-controls="trd-mobile-menu-root" aria-expanded="false"><span class="material-icons-round text-[17px]">menu</span><span>เมนู</span></button>
-                            <button type="button" class="trd-topbar__action" onclick="fetchInitialData(true)" title="รีเฟรชข้อมูล"><span class="material-icons-round text-[17px]">refresh</span><span>รีเฟรช</span></button>
+                            <button type="button" class="trd-topbar__action" onclick="${state.view === 'dashboard' && state.dashboardTab === 'product' ? 'fetchProductMovementReport(true)' : 'fetchInitialData(true)'}" title="รีเฟรชข้อมูล"><span class="material-icons-round text-[17px]">refresh</span><span>รีเฟรช</span></button>
                             <button type="button" class="trd-topbar__action trd-topbar__action--portal" onclick="goToPortal()" title="กลับ Main Portal"><span class="material-icons-round text-[17px]">logout</span><span>Main</span></button>
                         </div>
                     </div>`;
             }
             if (moduleNav) {
                 moduleNav.innerHTML = `<div class="trd-module-nav__inner">${navItems.map(item => `
-                    <button type="button" class="trd-module-tab ${state.view === item.view ? 'is-active' : ''}" onclick="setView('${item.view}')" aria-current="${state.view === item.view ? 'page' : 'false'}">
+                    <button type="button" class="trd-module-tab ${(state.view === 'w1' ? 'check_stock' : state.view) === item.view ? 'is-active' : ''}" onclick="setView('${item.view}')" aria-current="${(state.view === 'w1' ? 'check_stock' : state.view) === item.view ? 'page' : 'false'}">
                         <span class="material-icons-round text-[17px]">${item.icon}</span>${item.label}${item.count > 0 ? `<span class="trd-module-tab__count trd-module-tab__count--yellow">${item.count}</span>` : ''}
                         </button>`).join('')}</div>`;
             }
@@ -6679,7 +6654,7 @@
                         </div>
                         <nav class="trd-mobile-menu__items" aria-label="เมนูโมดูล TRDAKRA">
                             ${navItems.map(item => `
-                                <button type="button" class="trd-mobile-menu__item ${state.view === item.view ? 'is-active' : ''}" onclick="setView('${item.view}')" aria-current="${state.view === item.view ? 'page' : 'false'}">
+                                <button type="button" class="trd-mobile-menu__item ${(state.view === 'w1' ? 'check_stock' : state.view) === item.view ? 'is-active' : ''}" onclick="setView('${item.view}')" aria-current="${(state.view === 'w1' ? 'check_stock' : state.view) === item.view ? 'page' : 'false'}">
                                     <span class="material-icons-round text-[20px]">${item.icon}</span>
                                     <span class="min-w-0 flex-1 truncate">${item.label}</span>
                                     ${item.count > 0 ? `<span class="trd-module-tab__count trd-module-tab__count--yellow">${item.count}</span>` : ''}
@@ -6695,11 +6670,10 @@
             const col  = state.sidebarCollapsed;
             const navItems = [
                 { view: 'home',        icon: 'home',           label: 'หน้าหลัก',    sub: 'Dashboard' },
-                { view: 'w1',          icon: 'shopping_cart',  label: 'เบิกสินค้า',  sub: 'TRD' },
+                { view: 'check_stock', icon: 'fact_check', label: 'สำรวจสต็อก', sub: 'TRD' },
                 { view: 'w2',          icon: 'local_shipping', label: 'จัดส่งสินค้า', sub: 'AKRA' },
                 { view: 'dashboard',   icon: 'bar_chart',      label: 'Analytics',   sub: 'รายงาน' },
                 { view: 'location',    icon: 'place',          label: 'จัดโลเคชั่น', sub: 'Location' },
-                { view: 'check_stock', icon: 'inventory_2',    label: 'ตรวจสต็อก',  sub: 'Check Stock' },
             ];
             return `
                 <!-- Header: Logo + Hamburger -->
@@ -6724,7 +6698,7 @@
                 <!-- Nav items -->
                 <nav class="flex-1 ${col ? 'px-2' : 'px-3'} space-y-0.5 pt-1">
                     ${navItems.map(item => {
-                        const active = state.view === item.view;
+                        const active = (state.view === 'w1' ? 'check_stock' : state.view) === item.view;
                         return `
                         <button onclick="setView('${item.view}')"
                                 title="${item.label}"
