@@ -2,6 +2,7 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
+    <script src="js/akra-shell-bridge.js?v=20260919.02"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📦</text></svg>">
@@ -640,9 +641,9 @@
 </head>
 <body class="trdakra-shell">
 
-    <header id="trd-topbar" class="trd-topbar" aria-label="TRDAKRA navigation"></header>
-    <nav id="trd-module-nav" aria-label="เมนู TRDAKRA"></nav>
-    <div id="trd-mobile-menu-root" aria-hidden="true"></div>
+    <header id="trd-topbar" hidden class="trd-topbar" aria-label="TRDAKRA navigation"></header>
+    <nav id="trd-module-nav" hidden aria-label="เมนู TRDAKRA"></nav>
+    <div id="trd-mobile-menu-root" hidden aria-hidden="true"></div>
 
     <!-- Loading Overlay -->
     <div id="loading-overlay" class="flex">
@@ -650,7 +651,12 @@
         <p class="text-brand-blue font-bold text-sm tracking-wide" id="loading-text">กำลังโหลดข้อมูล...</p>
     </div>
 
-    <div id="app-root" class="min-h-screen flex justify-center">
+    <style>[hidden], body.trdakra-shell #app-root[hidden] { display: none !important; }</style>
+    <section id="session-status" hidden class="p-8 text-center">
+        <p id="session-status-text" role="status">กรุณาเข้าสู่ระบบผ่าน Main</p>
+        <button type="button" class="mt-4 rounded-xl bg-brand-blue text-white px-5 py-3" onclick="window.AkraModule.home(SSO_CONFIG.PORTAL_URL)">กลับ Main</button>
+    </section>
+    <div id="app-root" hidden class="min-h-screen flex justify-center">
         <aside id="sidebar"></aside>
         <div id="main-view" class="flex-1 flex justify-center min-h-screen"></div>
     </div>
@@ -659,8 +665,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260915.04";
-        const GOOGLE_APP_SCRIPT_URL_LOG = "https://script.google.com/macros/s/AKfycbw5PCJ1OlxCQR6zaNubrmZTgaORB-rJK2Ow5_YC3i5kKv-BrrTgJkTJyNZKrzfodK1m/exec";
+        const CURRENT_VERSION = "20260919.02";
 
         const SUPABASE_CONFIG = {
             URL: "https://hgxrrskztbpejirrdpbq.supabase.co"
@@ -669,13 +674,14 @@
 
         const SSO_CONFIG = {
             PORTAL_URL:     "https://akra-web.github.io/Main/",
-            API_URL:        "https://script.google.com/macros/s/AKfycbyQJLwb5HTexG6gxqTehGWlAxfSXVT--CpWnnp2JTcP4xCcMA1vUjSY_eWqPjUKwzq7/exec",
             STORAGE_KEY:    "akra_trdakra_session",
             REQUIRED_ROLES: []  // [] = ทุก Role เข้าได้ | ระบุเช่น ["ADMIN","TRD"] เพื่อจำกัดสิทธิ์
         };
 
         let currentUser = null;
         let sessionToken = null;  // SSO token ที่ verify แล้ว ใช้แนบกับทุก mutation POST
+        let trdSessionEventsBound = false;
+        let trdInitialRequestId = 0;
 
         function authUrl() {
             return TRD_API_URL;
@@ -698,9 +704,8 @@
 
         // UI helpers สำหรับแสดง error และ redirect
         function ssoShowError(message) {
-            document.getElementById('loading-overlay').style.display = 'none';
-            alert(message);
-            setTimeout(() => { window.location.replace(SSO_CONFIG.PORTAL_URL); }, 500);
+            invalidateTrdSession(message);
+            if (window.AkraModule?.embedded) window.AkraModule.authRequired(SSO_CONFIG.PORTAL_URL);
         }
 
         // ฟังก์ชัน verify token + init app — เรียกใน window.onload
@@ -724,130 +729,121 @@
     }
 
         async function ssoInit() {
-            // ── DEV BYPASS: เฉพาะ localhost เท่านั้น (?demo=1 ใช้ได้เฉพาะบน localhost เพื่อกัน bypass บน production) ──
-            const isLocalhost = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
-            const isDemoMode  = isLocalhost && new URLSearchParams(location.search).get('demo') === '1';
-            if (isLocalhost || isDemoMode) {
-                currentUser = 'ทดสอบระบบ';
-                showLoading('กำลังโหลดข้อมูล (Demo Mode)...');
-                fetchInitialData();
+            window.appSession = null;
+            currentUser = null;
+            sessionToken = null;
+            if (window.AkraModule?.embedded) {
+                try {
+                    const user = await window.AkraModule.verifySession('app-trd');
+                    currentUser = user.name;
+                    sessionToken = window.AkraModule.getToken();
+                    window.appSession = { ...user, tokenVersion: 2 };
+                    restoreTrdUserState();
+                    showTrdPrivateUI();
+                    showLoading('กำลังโหลดข้อมูลเบิกจ่าย...');
+                    fetchInitialData();
+                } catch (_) {
+                    ssoShowError('ตรวจสอบสิทธิ์ไม่สำเร็จ กรุณากลับ Main เพื่อลองใหม่');
+                }
                 return;
             }
-            // ────────────────────────────────────────────────────
             const urlParams = new URLSearchParams(window.location.search);
-            const ssoToken  = urlParams.get('sso');
-            const cachedRaw = localStorage.getItem(SSO_CONFIG.STORAGE_KEY);
+            const ssoToken = window.AkraModule?.getToken() || urlParams.get('sso');
+            let cachedRaw = null;
+            try { cachedRaw = localStorage.getItem(SSO_CONFIG.STORAGE_KEY); } catch (_) {}
             let cachedSession = null;
             try { if (cachedRaw) cachedSession = JSON.parse(cachedRaw); } catch(e) {}
             const tokenToVerify = ssoToken || (cachedSession && cachedSession.token);
 
-            if (tokenToVerify) {
-                const jwtUser = decodeJwtPayload(tokenToVerify);
-                if (jwtUser) {
-                    const roles = jwtUser.roles || [];
-                    const hasAccess = SSO_CONFIG.REQUIRED_ROLES.length === 0 || roles.includes('ADMIN') || roles.some(r => SSO_CONFIG.REQUIRED_ROLES.includes(r));
-                    if (hasAccess) {
-                        localStorage.setItem(SSO_CONFIG.STORAGE_KEY, JSON.stringify({
-                            name: jwtUser.name || jwtUser.id,
-                            id: jwtUser.id,
-                            roles: roles,
-                            token: tokenToVerify
-                        }));
-                        currentUser = jwtUser.name || jwtUser.id;
-                        sessionToken = tokenToVerify;
-                        if (ssoToken) { try { window.history.replaceState({}, document.title, window.location.pathname); } catch(e) {} }
-                        showLoading('กำลังโหลดข้อมูลเบิกจ่าย...');
-                        fetchInitialData();
-                        return;
-                    }
-                }
-            }
-
             if (ssoToken) {
-                // ===== มี Token จาก Main Menu — verify กับ Server =====
-                try { window.history.replaceState({}, document.title, window.location.pathname); } catch(e) {}
-
-                try {
-                    const rolesParam = SSO_CONFIG.REQUIRED_ROLES.length
-                        ? '&roles=' + SSO_CONFIG.REQUIRED_ROLES.join(',')
-                        : '';
-                    const res    = await fetch(`${SSO_CONFIG.API_URL}?action=verifyToken&token=${encodeURIComponent(ssoToken)}${rolesParam}`);
-                    const result = await res.json();
-
-                    if (!result.valid) {
-                        const errorMsg = {
-                            token_expired:    'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่',
-                            user_not_found:   'ไม่พบข้อมูลผู้ใช้ในระบบ',
-                            permission_denied:'คุณไม่มีสิทธิ์เข้าใช้งานระบบนี้',
-                            invalid_token:    'ไม่สามารถยืนยันตัวตนได้ กรุณาเข้าสู่ระบบใหม่'
-                        };
-                        localStorage.removeItem(SSO_CONFIG.STORAGE_KEY);
-                        ssoShowError(errorMsg[result.reason] || 'เกิดข้อผิดพลาดในการยืนยันตัวตน');
-                        return;
-                    }
-
-                    // Token ผ่าน — บันทึก session + token ไว้ใช้ตอน refresh หน้า และแนบกับ mutation
-                    localStorage.setItem(SSO_CONFIG.STORAGE_KEY, JSON.stringify({
-                        name:  result.user.name,
-                        id:    result.user.id,
-                        roles: result.user.roles,
-                        token: ssoToken
-                    }));
-                    currentUser = result.user.name;
-                    sessionToken = ssoToken;
-
-                } catch(e) {
-                    ssoShowError('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์เพื่อตรวจสอบสิทธิ์ได้');
-                    return;
-                }
-
-            } else {
-                // ===== ไม่มี Token — อ่าน session เดิม (กรณี refresh หน้า) =====
-                const cached = localStorage.getItem(SSO_CONFIG.STORAGE_KEY);
-                if (!cached) {
-                    ssoShowError('กรุณาเข้าสู่ระบบผ่านหน้า Portal ก่อนใช้งาน');
-                    return;
-                }
-                try {
-                    const session = JSON.parse(cached);
-                    // session เก่าที่ไม่มี token (ก่อนเวอร์ชันนี้) ใช้ mutation ไม่ได้ → บังคับ login ใหม่เพื่อรับ token
-                    if (!session.token) {
-                        localStorage.removeItem(SSO_CONFIG.STORAGE_KEY);
-                        ssoShowError('กรุณาเข้าสู่ระบบใหม่ผ่านหน้า Portal');
-                        return;
-                    }
-                    const hasPermission = SSO_CONFIG.REQUIRED_ROLES.length === 0 ||
-                        session.roles.some(r => SSO_CONFIG.REQUIRED_ROLES.includes(r));
-                    if (!hasPermission) {
-                        localStorage.removeItem(SSO_CONFIG.STORAGE_KEY);
-                        ssoShowError('คุณไม่มีสิทธิ์เข้าใช้งานระบบนี้');
-                        return;
-                    }
-                    currentUser = session.name;
-                    sessionToken = session.token;
-                } catch(e) {
-                    localStorage.removeItem(SSO_CONFIG.STORAGE_KEY);
-                    ssoShowError('Session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่');
-                    return;
-                }
+                urlParams.delete('sso');
+                window.history.replaceState({}, document.title, window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : ''));
+            }
+            if (!tokenToVerify && window.AkraModule?.isLocalPreview() === true) {
+                currentUser = 'ทดสอบระบบ';
+                window.appSession = { preview:true };
+                showTrdPrivateUI();
+                fetchInitialData();
+                return;
+            }
+            try {
+                if (!tokenToVerify) throw new Error('no_token');
+                const user = await window.AkraModule.verifySession('app-trd', tokenToVerify);
+                if (localStorage.getItem(SSO_CONFIG.STORAGE_KEY) !== cachedRaw) throw new Error('session_changed');
+                currentUser = user.name;
+                sessionToken = tokenToVerify;
+                window.appSession = { ...user };
+                try { localStorage.setItem(SSO_CONFIG.STORAGE_KEY, JSON.stringify({ ...user, token:tokenToVerify })); } catch (_) {}
+            } catch (_) {
+                ssoShowError('ตรวจสอบสิทธิ์ไม่สำเร็จ กรุณาเข้าสู่ระบบผ่าน Main อีกครั้ง');
+                return;
             }
 
             // Auth ผ่าน — โหลดแอพ
+            restoreTrdUserState();
+            bindTrdSessionEvents();
+            showTrdPrivateUI();
             showLoading('กำลังโหลดข้อมูลเบิกจ่าย...');
             fetchInitialData();
         }
 
+        function getTrdToken() {
+            try { return window.appSession && (window.AkraModule?.embedded ? window.AkraModule.getToken() : sessionToken) || ''; } catch (_) { return ''; }
+        }
+        function isCurrentTrdSession(owner, token) {
+            return Boolean(owner && owner === window.appSession && token && token === getTrdToken());
+        }
+        function showTrdPrivateUI() {
+            ['app-root','trd-topbar','trd-module-nav','trd-mobile-menu-root'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.hidden = false;
+            });
+            const status = document.getElementById('session-status'); if (status) status.hidden = true;
+        }
+        function invalidateTrdSession(message) {
+            window.appSession = null;
+            sessionToken = null;
+            currentUser = null;
+            ++trdInitialRequestId;
+            ++state.surveyLogsRequestId;
+            ++state.productMovementRequestId;
+            ++state.productMovementDetailRequestId;
+            Object.assign(state, {items:[],products:[],surveyData:{},checkStockEdits:{},checkStockCheckedLocations:{},receiptDrafts:{},w2BatchEdits:{},w2PartialQty:{},surveyLogs:null,productMovementReport:null,productMovementDetail:null});
+            if (typeof toggleMobileMenu === 'function') toggleMobileMenu(false);
+            ['app-root','trd-topbar','trd-module-nav','trd-mobile-menu-root'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.hidden = true;
+            });
+            const status = document.getElementById('session-status'); if (status) status.hidden = false;
+            const text = document.getElementById('session-status-text'); if (text) text.textContent = message;
+            hideLoading();
+        }
+        function bindTrdSessionEvents() {
+            window.AkraModule?.watchSession?.({appId:'app-trd', user:window.appSession, token:sessionToken,
+                invalidated:() => invalidateTrdSession('เซสชัน Main เปลี่ยนแล้ว กรุณาเปิดแอปจาก Main ใหม่'),
+                refreshed:token => { sessionToken = token; if (window.appSession) window.appSession.token = token; }
+            });
+            if (trdSessionEventsBound) return;
+            trdSessionEventsBound = true;
+            window.addEventListener('storage', event => {
+                if (window.AkraModule?.embedded || (event.key !== null && event.key !== SSO_CONFIG.STORAGE_KEY)) return;
+                if (event.key !== null && event.oldValue === event.newValue) return;
+                invalidateTrdSession('บัญชีหรือเซสชันเปลี่ยนแล้ว กรุณาเปิดแอปจาก Main ใหม่');
+            });
+        }
+        function restoreTrdUserState() {
+            state.checkStockCheckedLocations = getTrdUserState('TRDAKRA_CHECKED_LOCATIONS') || {};
+            const survey = getTrdUserState('TRDAKRA_SURVEY_SESSION');
+            state.surveyData = survey?.data && typeof survey.data === 'object' ? survey.data : {};
+            state.surveyFloor = survey?.floor || null;
+        }
+
         function sendAppLog(action, details) {
             const payload = { user: currentUser, action: action, app: CURRENT_APP_NAME, details: details };
-            fetch(GOOGLE_APP_SCRIPT_URL_LOG, {
-                method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-            }).then(() => { console.log(`บันทึก Log สำเร็จ: ${action}`); }).catch(err => console.error(err));
+            // Audit logging must use the trusted TRD Edge boundary; never post user data to legacy GAS.
         }
 
         // ==========================================
         // 1. CONFIGURATION & STATE
         // ==========================================
-        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby7o8ZiRT7N9ahtZjFuLf42bUDZsnmfXNvoAucT9RVnwJWQNOdiEqRTh1Qld1MMmsc/exec';
         let state = {
             view: 'home',
             w1Tab: 'request',
@@ -887,7 +883,7 @@
             checkStockLocation: null,
             checkStockEdits: {}, // { productName: { checked: true, currentStock: '', requestQty: '' } }
             checkStockSearch: '',
-            checkStockCheckedLocations: JSON.parse(localStorage.getItem('TRDAKRA_CHECKED_LOCATIONS') || '{}'),
+            checkStockCheckedLocations: {},
             checkStockSubmitting: false,
             checkStockEditingPar: null,
             checkStockParInput: '',
@@ -1018,12 +1014,33 @@
 
         const TRD_CACHE_TTL = 10 * 60 * 1000;
         const INVENTORY_WINDOW_DAYS = 7;
-        function getCache(key, ttlMs) { try { const raw = localStorage.getItem(key); if (!raw) return null; const w = JSON.parse(raw); if (Date.now() - (w._ts||0) > ttlMs) { localStorage.removeItem(key); return null; } return w._d; } catch(e) { localStorage.removeItem(key); return null; } }
+        function trdStorageKey(key, authorizationScoped = false) {
+            const user = window.appSession, id = String(user?.identityId || '').toLowerCase();
+            if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return '';
+            if (authorizationScoped && (!Number.isSafeInteger(user.sessionVersion) || user.sessionVersion < 1 || !user.authorizationRevision)) return '';
+            return key + ':identity:' + id + (authorizationScoped ? ':' + user.sessionVersion + ':' + encodeURIComponent(user.authorizationRevision) : '');
+        }
+        function getTrdUserState(key) {
+            const scoped = trdStorageKey(key); if (!scoped) return null;
+            try { return JSON.parse(localStorage.getItem(scoped) || 'null'); } catch (_) { return null; }
+        }
+        function setTrdUserState(key, data) {
+            const scoped = trdStorageKey(key); if (!scoped) return false;
+            try { localStorage.setItem(scoped, JSON.stringify(data)); return true; } catch (_) { return false; }
+        }
+        function removeTrdUserState(key) {
+            const scoped = trdStorageKey(key); if (!scoped) return;
+            try { localStorage.removeItem(scoped); } catch (_) {}
+        }
+        function getCache(key, ttlMs) { const scoped=trdStorageKey(key,true); if(!scoped)return null; try { const raw = localStorage.getItem(scoped); if (!raw) return null; const w = JSON.parse(raw); if (Date.now() - (w._ts||0) > ttlMs) { localStorage.removeItem(scoped); return null; } return w._d; } catch(e) { return null; } }
+        function removeCache(key) { const scoped=trdStorageKey(key,true); if(!scoped)return; try { localStorage.removeItem(scoped); } catch (_) {} }
         function setCache(key, data) {
+            const scoped = trdStorageKey(key,true); if (!scoped) return false;
             try {
-                localStorage.setItem(key, JSON.stringify({ _ts: Date.now(), _d: data }));
+                localStorage.setItem(scoped, JSON.stringify({ _ts: Date.now(), _d: data }));
+                return true;
             } catch (e) {
-                console.warn('Cache write skipped:', e);
+                return false;
             }
         }
         function itemsUrl(days) {
@@ -1407,7 +1424,7 @@
                     const selectedNames = Object.keys(state.locationSelectedItems);
                     const ok = await pushProductDetailsBatch(selectedNames, floor, floor === 'NOSTK' ? '' : zone, parLevel);
                     if (!ok) { hideLoading(); alert('บันทึกโลเคชั่นไม่สำเร็จ ข้อมูลอาจยังไม่ถูกบันทึก กรุณาลองใหม่'); return; }
-                    localStorage.removeItem('TRDAKRA_DATA');
+                    removeCache('TRDAKRA_DATA');
                     sendAppLog('จัดโลเคชั่นกลุ่ม (TRD)', `${selectedNames.length} รายการ → ${floor === 'NOSTK' ? 'NOSTK' : 'W1-' + floor + 'F-' + zone}`);
 
                     // ล้างสเตตหลังบันทึกเสร็จ
@@ -1416,7 +1433,7 @@
                 } else {
                     const ok = await pushProductDetails(name, floor, floor === 'NOSTK' ? '' : zone, parLevel);
                     if (!ok) { hideLoading(); alert('บันทึกโลเคชั่นไม่สำเร็จ ข้อมูลอาจยังไม่ถูกบันทึก กรุณาลองใหม่'); return; }
-                    localStorage.removeItem('TRDAKRA_DATA');
+                    removeCache('TRDAKRA_DATA');
                     sendAppLog('จัดโลเคชั่นสินค้า (TRD)', `${name} → ${floor === 'NOSTK' ? 'NOSTK' : 'W1-' + floor + 'F-' + zone}`);
                 }
             } catch(e) {
@@ -1610,7 +1627,7 @@
             showLoading('กำลังย้ายสินค้าเข้าโซน...');
             try {
                 await pushProductDetailsBatch(selectedNames, floor, zone, 0);
-                localStorage.removeItem('TRDAKRA_DATA');
+                removeCache('TRDAKRA_DATA');
                 sendAppLog('เพิ่มสินค้าเข้าโซน (TRD)', `${selectedNames.length} รายการ → ชั้น ${floor} โซน ${zone}`);
                 
                 // ล้างสเตตและปิดหน้าต่าง
@@ -1907,29 +1924,40 @@
         }
 
         async function ensureFullHistoryLoaded(options = {}) {
+            const owner = window.appSession, token = getTrdToken();
+            if (!owner || !token) return false;
+            const initialRequestId = trdInitialRequestId;
+            const current = () => initialRequestId === trdInitialRequestId && isCurrentTrdSession(owner, token);
             if (state.fullHistoryLoaded || state.fullHistoryLoading) return state.fullHistoryLoaded;
             state.fullHistoryLoading = true;
             state.fullHistoryError = '';
             if (options.renderStart) render();
             try {
-                const headers = sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {};
+                const headers = { 'Authorization': `Bearer ${token}` };
                 const res = await fetch(`${TRD_API_URL}?action=getFullHistory`, { headers });
-                if (!res.ok) throw new Error('http_' + res.status);
+                if (!res.ok) throw Object.assign(new Error('http_' + res.status), {status:res.status});
                 const data = await res.json();
+                if (!current()) return false;
                 const list = Array.isArray(data) ? data : (data && (data.items || data.records)) || [];
                 state.items = mergeItemsById(state.items, list);
                 state.fullHistoryLoaded = true;
             } catch (error) {
+                if (!current()) return false;
+                if ([401,403].includes(error.status)) { invalidateTrdSession('เซสชันหรือสิทธิ์เปลี่ยนแล้ว กรุณาเปิดแอปจาก Main ใหม่'); return false; }
                 console.error('Full history load failed:', error);
                 state.fullHistoryError = 'load_failed';
             } finally {
-                state.fullHistoryLoading = false;
-                render();
+                if (current()) { state.fullHistoryLoading = false; render(); }
             }
             return state.fullHistoryLoaded;
         }
 
         async function fetchInitialData(isRefresh = false, skipHideLoading = false) {
+            if (window.appSession?.preview) { render(); hideLoading(); return; }
+            const owner = window.appSession, token = getTrdToken();
+            if (!owner || !token) return;
+            const requestId = ++trdInitialRequestId;
+            const current = () => requestId === trdInitialRequestId && isCurrentTrdSession(owner, token);
             const startTotal = performance.now();
             let hasUsableCache = false;
             if (!isRefresh) {
@@ -1947,10 +1975,11 @@
 
             try {
                 const startFetch = performance.now();
-                const headers = sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {};
+                const headers = { 'Authorization': `Bearer ${token}` };
                 const res = await fetch(`${TRD_API_URL}?action=getInitialData&days=${INVENTORY_WINDOW_DAYS}`, { headers });
-                if (!res.ok) throw new Error('http_' + res.status);
+                if (!res.ok) throw Object.assign(new Error('http_' + res.status), {status:res.status});
                 const data = await res.json();
+                if (!current()) return;
                 const durationFetch = ((performance.now() - startFetch) / 1000).toFixed(2);
 
                 const itemsData = data.items || [];
@@ -1986,10 +2015,12 @@
                     console.log(`[PERF] fetchInitialData: total=${durationTotal}s, fetch=${durationFetch}s`);
                 }
             } catch (error) {
+                if (!current()) return;
+                if ([401,403].includes(error.status)) { invalidateTrdSession('เซสชันหรือสิทธิ์เปลี่ยนแล้ว กรุณาเปิดแอปจาก Main ใหม่'); return; }
                 console.error('Error fetching data:', error);
                 if (!hasUsableCache) alert('ไม่สามารถเชื่อมต่อกับฐานข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
             } finally {
-                if (!skipHideLoading) {
+                if (current() && !skipHideLoading) {
                     hideLoading();
                 }
             }
@@ -1997,17 +2028,26 @@
 
         // ส่ง mutation ไป backend แล้วตรวจผลจริง — throw Error(reason) เมื่อ HTTP ไม่ ok หรือ backend ตอบ error/success:false
         async function postMutation(payload) {
+            const operation = () => transportMutation(payload);
+            return window.AkraModule?.embedded ? window.AkraModule.runMutation(operation) : operation();
+        }
+
+        async function transportMutation(payload) {
+            const owner = window.appSession, token = getTrdToken();
+            if (!owner || !token) throw new Error('no_token');
             const res = await fetch(authUrl(), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': sessionToken ? `Bearer ${sessionToken}` : ''
+                    'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify(payload)
             });
+            if (!isCurrentTrdSession(owner, token)) throw Object.assign(new Error('session_changed'), {reason:'session_changed'});
             if (!res.ok) throw new Error('http_' + res.status);
             let data;
             try { data = await res.json(); } catch (e) { throw new Error('bad_response'); }
+            if (!isCurrentTrdSession(owner, token)) throw Object.assign(new Error('session_changed'), {reason:'session_changed'});
             if (data && (data.status === 'error' || data.success === false)) {
                 throw new Error(data.reason || data.message || 'save_failed');
             }
@@ -2015,12 +2055,17 @@
                 state.productMovementReport = null;
                 state.productMovementDetail = null;
             }
+            window.AkraModule?.markSaved();
             return data;
         }
 
         // ข้อความ error ที่เป็นมิตร แยกเคส auth/เซสชันหมดอายุ ออกจากความผิดพลาดทั่วไป
         function saveErrorMessage(err) {
             const r = (err && err.message) || '';
+            if (r === 'session_changed') return 'บัญชีเปลี่ยนแล้ว กรุณาเปิดแอปจาก Main ใหม่ และตรวจผลรายการเดิมก่อนส่งซ้ำ';
+            if (r === 'permission_denied' || r === 'http_403') {
+                return 'ไม่มีสิทธิ์ดำเนินการนี้ กรุณาตรวจสิทธิ์ใน Main ข้อมูลในแบบฟอร์มยังไม่ได้บันทึก';
+            }
             if (r === 'no_token' || r === 'invalid_or_expired_token' || r === 'verify_failed') {
                 return 'เซสชันหมดอายุหรือสิทธิ์ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่';
             }
@@ -2165,7 +2210,6 @@
 
         async function saveReceiptItems(items, options = {}) {
             if (await AppVersionGuard.blockIfStale()) return false;
-            if (!APPS_SCRIPT_URL) return false;
             showLoading('กำลังบันทึกผลตรวจรับ...');
             try {
                 return await postMutation({
@@ -2199,7 +2243,6 @@
         // คืน object response เมื่อสำเร็จ, คืน false เมื่อล้มเหลว
         async function saveInventoryDelta(operations, options = {}) {
             if (await AppVersionGuard.blockIfStale()) return false;
-            if (!APPS_SCRIPT_URL) return false;
             const skipHideLoading = !!options.skipHideLoading;
             showLoading('กำลังบันทึกข้อมูล...');
             try {
@@ -2228,7 +2271,6 @@
         // คืน true เมื่อบันทึกสำเร็จจริง, false เมื่อล้มเหลว (caller ต้องไม่แสดงสำเร็จเมื่อ false)
         async function syncDataToSheet(skipHideLoading = false) {
             if (await AppVersionGuard.blockIfStale()) return false;
-            if (!APPS_SCRIPT_URL) return false;
             showLoading('กำลังบันทึกข้อมูล...');
             try {
                 const itemsToSave = state.items.map(({rawDate, ...rest}) => rest);
@@ -2455,6 +2497,8 @@
         }
 
         async function fetchSurveyLogs(monthKey) {
+            const owner = window.appSession, token = getTrdToken();
+            if (!owner || !token) return;
             const selectedMonth = monthKey || state.surveyMonthKey;
             const requestId = ++state.surveyLogsRequestId;
             state.surveyMonthKey = selectedMonth;
@@ -2462,14 +2506,14 @@
             state.surveyLogsError = '';
             render();
             try {
-                const headers = sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {};
+                const headers = { 'Authorization': `Bearer ${token}` };
                 const res = await fetch(`${TRD_API_URL}?action=getSurveyLogMonthly&month=${encodeURIComponent(selectedMonth)}`, { headers });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 if (!data || data.status !== 'success' || !Array.isArray(data.records || data.details)) {
                     throw new Error(data && data.message ? data.message : 'Invalid SurveyLog response');
                 }
-                if (requestId !== state.surveyLogsRequestId) return;
+                if (requestId !== state.surveyLogsRequestId || !isCurrentTrdSession(owner, token)) return;
                 state.surveyLogs = {
                     status: 'success',
                     monthKey: selectedMonth,
@@ -2477,12 +2521,12 @@
                 };
                 state.surveyMonthKey = selectedMonth;
             } catch(e) {
-                if (requestId !== state.surveyLogsRequestId) return;
+                if (requestId !== state.surveyLogsRequestId || !isCurrentTrdSession(owner, token)) return;
                 console.error('SurveyLog history error', e);
                 state.surveyLogs = null;
                 state.surveyLogsError = 'โหลดประวัติการสำรวจไม่สำเร็จ กรุณาลองใหม่';
             } finally {
-                if (requestId !== state.surveyLogsRequestId) return;
+                if (requestId !== state.surveyLogsRequestId || !isCurrentTrdSession(owner, token)) return;
                 state.surveyLogsLoading = false;
                 render();
             }
@@ -2856,7 +2900,7 @@
                 document.getElementById('loading-text').innerText = `กำลังนำเข้า Par Level ${count}/${entries.length}...`;
             }
             // Invalidate cache so next load gets fresh parLevel
-            localStorage.removeItem('TRDAKRA_DATA');
+            removeCache('TRDAKRA_DATA');
             hideLoading();
             alert(`✅ นำเข้า Par Level สำเร็จ ${count} รายการ\nกำลังรีเฟรชข้อมูล...`);
             sendAppLog('นำเข้า Par Level จากประวัติ', `อัปเดต ${count} รายการ`);
@@ -2872,7 +2916,7 @@
             state.surveyFloor = floor;
             state.surveyZone = null;
             state.surveyView = 'list';
-            try { localStorage.setItem('TRDAKRA_SURVEY_SESSION', JSON.stringify({ floor: floor, data: state.surveyData })); } catch(e) {}
+            setTrdUserState('TRDAKRA_SURVEY_SESSION', { floor:floor, data:state.surveyData });
             render();
         }
 
@@ -2880,12 +2924,7 @@
             if (!state.surveyData[itemName]) state.surveyData[itemName] = { currentStock: '', parLevel: '' };
             state.surveyData[itemName][field] = value;
             // Persist survey session to survive page refresh
-            try {
-                localStorage.setItem('TRDAKRA_SURVEY_SESSION', JSON.stringify({
-                    floor: state.surveyFloor,
-                    data: state.surveyData
-                }));
-            } catch(e) {}
+            setTrdUserState('TRDAKRA_SURVEY_SESSION', { floor:state.surveyFloor, data:state.surveyData });
             // Real-time re-render สรุปท้ายหน้า
             const summaryEl = document.getElementById('survey-summary');
             if (summaryEl) {
@@ -2936,7 +2975,9 @@
         }
 
         async function handleSurveyBulkOrder() {
+            const owner = window.appSession, token = getTrdToken();
             if (await AppVersionGuard.blockIfStale()) return;
+            if (!isCurrentTrdSession(owner, token)) return;
             const list = state.surveyConfirmList;
             if (!list || list.length === 0) return;
             showLoading('กำลังส่งรายการเบิก...');
@@ -2975,6 +3016,7 @@
             }));
 
             const res = await saveInventoryDelta(operations, { perfName: 'handleSurveyBulkOrder' });
+            if (!isCurrentTrdSession(owner, token)) return;
             if (!res) { hideLoading(); await fetchInitialData(true); return; }
 
             state.items = [...newItems, ...state.items];
@@ -2988,6 +3030,7 @@
             try {
                 await postMutation({ action: 'saveSurveyLog', surveyedBy: currentUser || 'ไม่ทราบ', floor: state.surveyFloor, items: logItems });
             } catch(e) { console.error('SurveyLog error', e); }
+            if (!isCurrentTrdSession(owner, token)) return;
 
             // อัปเดต ParLevel กลับ Product Sheet
             for (const prod of state.products.filter(p => p.floor === state.surveyFloor)) {
@@ -3003,7 +3046,7 @@
                 ? `\n⚠️ ข้ามที่เบิกซ้ำ ${skippedDup.length} รายการ: ${skippedDup.join(', ')}` : '';
             alert(`✅ ส่งเบิกสำเร็จ ${newItems.length} รายการ จากชั้น ${state.surveyFloor}${surveyDupNote}`);
             sendAppLog('สำรวจสต๊อก+เบิก (Survey)', `ชั้น ${state.surveyFloor}: เบิก ${newItems.length} รายการ`);
-            localStorage.removeItem('TRDAKRA_SURVEY_SESSION');
+            removeTrdUserState('TRDAKRA_SURVEY_SESSION');
             state.surveyView = 'floors';
             state.surveyFloor = null;
             state.surveyData = {};
@@ -4097,6 +4140,8 @@
         }
 
         async function fetchProductMovementReport(forceRefresh = false) {
+            const owner = window.appSession, token = getTrdToken();
+            if (!owner || !token) return;
             const requestId = ++state.productMovementRequestId;
             if (state.products && state.products.length > 0) {
                 state.productMovementReport = computeProductMovementReportClient();
@@ -4106,18 +4151,21 @@
             render();
             try {
                 await ensureFullHistoryLoaded();
+                if (!isCurrentTrdSession(owner, token) || requestId !== state.productMovementRequestId) return;
                 state.productMovementReport = computeProductMovementReportClient();
                 if (state.productSelected) fetchProductMovementDetail(state.productSelected);
             } catch (error) {
                 console.error('Product movement report error:', error);
             } finally {
-                if (requestId !== state.productMovementRequestId) return;
+                if (requestId !== state.productMovementRequestId || !isCurrentTrdSession(owner, token)) return;
                 state.productMovementLoading = false;
                 render();
             }
         }
 
         async function fetchProductMovementDetail(productName) {
+            const owner = window.appSession, token = getTrdToken();
+            if (!owner || !token) return;
             const target = String(productName || '').trim();
             if (!target) return;
             const requestId = ++state.productMovementDetailRequestId;
@@ -4126,6 +4174,7 @@
             render();
             try {
                 await ensureFullHistoryLoaded();
+                if (!isCurrentTrdSession(owner, token) || requestId !== state.productMovementDetailRequestId) return;
                 const matched = (state.items || []).filter(i => (i.itemName || '').trim() === target);
                 const records = matched.map(i => {
                     const reqQty = parseInt(i.requestQty) || 0;
@@ -4153,11 +4202,11 @@
                     totalCount: records.length
                 };
             } catch (error) {
-                if (requestId !== state.productMovementDetailRequestId) return;
+                if (requestId !== state.productMovementDetailRequestId || !isCurrentTrdSession(owner, token)) return;
                 console.error('Product movement detail error:', error);
                 state.productMovementDetailError = 'โหลดประวัติรายรอบไม่สำเร็จ';
             } finally {
-                if (requestId !== state.productMovementDetailRequestId) return;
+                if (requestId !== state.productMovementDetailRequestId || !isCurrentTrdSession(owner, token)) return;
                 state.productMovementDetailLoading = false;
                 render();
             }
@@ -4334,7 +4383,7 @@
             return renderProductMovementOverview();
         }
 
-        // Legacy recent-data landing remains as a compatibility fallback until GAS/frontend rollout is complete.
+        // Recent-data landing is a bounded local fallback for an unavailable report, never a legacy transport.
         function renderLegacyProductLanding() {
             return renderProductLanding();
         }
@@ -5937,7 +5986,7 @@
             }
             if (changed) {
                 state.checkStockCheckedLocations = cleaned;
-                localStorage.setItem('TRDAKRA_CHECKED_LOCATIONS', JSON.stringify(cleaned));
+                setTrdUserState('TRDAKRA_CHECKED_LOCATIONS', cleaned);
             }
             return cleaned;
         }
@@ -6039,7 +6088,9 @@
         }
 
         async function handleCheckStockSubmit() {
+            const owner = window.appSession, token = getTrdToken();
             if (await AppVersionGuard.blockIfStale()) return;
+            if (!isCurrentTrdSession(owner, token)) return;
             if (state.checkStockSubmitting) return; // Prevent double submission
             
             const locObj = state.checkStockLocation;
@@ -6146,12 +6197,13 @@
                     }));
                     
                     const res = await saveInventoryDelta(operations, { perfName: 'submitZoneCheck', skipHideLoading: true });
+                    if (!isCurrentTrdSession(owner, token)) return;
                     if (!res) { await fetchInitialData(true, true); return; }
                     
                     state.items = [...newOrders, ...state.items];
                 }
 
-                // 2. Submit survey log (non-fatal: รายการสั่งเบิกถูกบันทึกแล้ว)
+                // Orders may already be saved; the zone is complete only after its report is confirmed.
                 showLoading('กำลังบันทึกประวัติการสำรวจ...');
                 try {
                     await postMutation({
@@ -6160,16 +6212,24 @@
                         floor: `${floor} - โซน ${loc}`, // Save as e.g. "2 - โซน 3"
                         items: logItems
                     });
-                } catch(e) { console.error('SurveyLog error', e); }
+                } catch(e) {
+                    if (!isCurrentTrdSession(owner, token)) return;
+                    removeCache('TRDAKRA_DATA');
+                    alert(newOrders.length > 0
+                        ? 'คำขอเบิกบันทึกแล้ว แต่ยังยืนยันรายงานสำรวจไม่ได้ กรุณาตรวจรายงานก่อนส่งซ้ำ พื้นที่นี้ยังไม่ถูกทำเครื่องหมายว่าตรวจแล้ว'
+                        : 'ยังยืนยันรายงานสำรวจไม่ได้ กรุณาตรวจผลก่อนส่งซ้ำ พื้นที่นี้ยังไม่ถูกทำเครื่องหมายว่าตรวจแล้ว');
+                    return;
+                }
+                if (!isCurrentTrdSession(owner, token)) return;
 
                 // Invalidate cache
-                localStorage.removeItem('TRDAKRA_DATA');
+                removeCache('TRDAKRA_DATA');
 
                 // Mark location as checked
                 const compoundKey = `${floor}|${loc}`;
                 if (!state.checkStockCheckedLocations) state.checkStockCheckedLocations = {};
                 state.checkStockCheckedLocations[compoundKey] = new Date().toISOString();
-                localStorage.setItem('TRDAKRA_CHECKED_LOCATIONS', JSON.stringify(state.checkStockCheckedLocations));
+                setTrdUserState('TRDAKRA_CHECKED_LOCATIONS', state.checkStockCheckedLocations);
 
                 // Go back to location selector page immediately so it's ready behind loader
                 state.checkStockLocation = null;
@@ -6179,6 +6239,7 @@
                 // Refresh data with loading screen still visible
                 showLoading('กำลังรีเฟรชข้อมูลแผนผัง...');
                 await fetchInitialData(true, true); // skipHideLoading = true
+                if (!isCurrentTrdSession(owner, token)) return;
 
                 // Show alert while loading is still covering the screen
                 const csDupNote = skippedDup.length > 0
@@ -6186,12 +6247,11 @@
                 alert(`✅ บันทึกสต๊อกสำเร็จ!\nส่งสั่งเบิก ${newOrders.length} รายการ จาก ชั้น ${floor} โซน ${loc}${csDupNote}`);
                 sendAppLog('ตรวจสต๊อกรายโซน', `ชั้น ${floor} โซน ${loc}: ส่งเบิก ${newOrders.length} รายการ`);
             } catch (err) {
+                if (!isCurrentTrdSession(owner, token)) return;
                 console.error(err);
                 alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง');
             } finally {
-                hideLoading();
-                state.checkStockSubmitting = false;
-                render();
+                if (isCurrentTrdSession(owner, token)) { hideLoading(); state.checkStockSubmitting = false; render(); }
             }
         }
 
@@ -6530,7 +6590,7 @@
         }
 
         function goToPortal() {
-            window.location.href = SSO_CONFIG.PORTAL_URL;
+            window.AkraModule.home(SSO_CONFIG.PORTAL_URL);
         }
 
         const mobileNavState = {
@@ -6742,6 +6802,7 @@
 
         // Main Render Function
         function render() {
+            if (!window.appSession) return;
             renderTopbar();
             const sidebar  = document.getElementById('sidebar');
             const mainView = document.getElementById('main-view');
