@@ -54,7 +54,7 @@ test('TRD standalone own-session replacement hides UI, keeps new login and block
 });
 test('TRD bootstrap late data cannot overwrite a new session or newer request; denial hides cache',async()=>{
  const f=fixture();f.user(original);const pending=[];let renders=0;
- Object.assign(f.ctx,{mapItemData:x=>x,needsFullHistoryForCurrentView:()=>false,render:()=>renders++,fetch:()=>new Promise(resolve=>pending.push(resolve))});
+ Object.assign(f.ctx,{mapItemData:x=>x,setOperationalWindow:x=>x,needsFullHistoryForCurrentView:()=>false,render:()=>renders++,fetch:()=>new Promise(resolve=>pending.push(resolve))});
  vm.runInContext(section('        async function fetchInitialData(','        // ส่ง mutation'),f.ctx);
  const old=f.ctx.fetchInitialData(),fresh=f.ctx.fetchInitialData(true);
  pending[1]({ok:true,json:async()=>({items:[{id:'fresh'}]})});await fresh;pending[0]({ok:true,json:async()=>({items:[{id:'stale'}]})});await old;
@@ -83,7 +83,7 @@ test('TRD full history and survey late responses cannot repopulate replaced-acco
 });
 test('TRD newer bootstrap supersedes in-flight full history and its finalizer',async()=>{
  const f=fixture();f.user(original);const requests=[];
- Object.assign(f.ctx,{mergeItemsById:(_old,rows)=>rows,mapItemData:x=>x,needsFullHistoryForCurrentView:()=>false,fetch:()=>new Promise(resolve=>requests.push(resolve))});
+ Object.assign(f.ctx,{mergeItemsById:(_old,rows)=>rows,mapItemData:x=>x,setOperationalWindow:x=>x,needsFullHistoryForCurrentView:()=>false,fetch:()=>new Promise(resolve=>requests.push(resolve))});
  vm.runInContext(section('        async function ensureFullHistoryLoaded(','        // ส่ง mutation'),f.ctx);
  const history=f.ctx.ensureFullHistoryLoaded(),fresh=f.ctx.fetchInitialData(true);
  requests[1]({ok:true,json:async()=>({items:[{id:'fresh'}]})});await fresh;

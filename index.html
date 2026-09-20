@@ -665,7 +665,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260919.02";
+        const CURRENT_VERSION = "20260920.01";
 
         const SUPABASE_CONFIG = {
             URL: "https://hgxrrskztbpejirrdpbq.supabase.co"
@@ -807,7 +807,7 @@
             ++state.surveyLogsRequestId;
             ++state.productMovementRequestId;
             ++state.productMovementDetailRequestId;
-            Object.assign(state, {items:[],products:[],surveyData:{},checkStockEdits:{},checkStockCheckedLocations:{},receiptDrafts:{},w2BatchEdits:{},w2PartialQty:{},surveyLogs:null,productMovementReport:null,productMovementDetail:null});
+            Object.assign(state, {items:[],activeItemIds:new Set(),activeItemsReady:false,products:[],surveyData:{},checkStockEdits:{},checkStockCheckedLocations:{},receiptDrafts:{},w2BatchEdits:{},w2PartialQty:{},surveyLogs:null,productMovementReport:null,productMovementDetail:null});
             if (typeof toggleMobileMenu === 'function') toggleMobileMenu(false);
             ['app-root','trd-topbar','trd-module-nav','trd-mobile-menu-root'].forEach(id => {
                 const el = document.getElementById(id); if (el) el.hidden = true;
@@ -857,6 +857,8 @@
             historyDir: 'desc',
             dashboardFilter: 'week',
             items: [],
+            activeItemIds: new Set(),
+            activeItemsReady: false,
             products: [],
             w1Rows: [{ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' }],
             // Location Manager State
@@ -1099,6 +1101,26 @@
                 if (item && item.id !== undefined && item.id !== null) byId.set(String(item.id), item);
             });
             return sortItemsNewestFirst(Array.from(byId.values()));
+        }
+
+        function getOperationalItems() {
+            if (!state.activeItemsReady || !state.activeItemIds || typeof state.activeItemIds.has !== 'function') {
+                return state.items || [];
+            }
+            return (state.items || []).filter(item => state.activeItemIds.has(String(item.id)));
+        }
+
+        function setOperationalWindow(items) {
+            const mapped = (items || []).map(mapItemData);
+            state.activeItemIds = new Set(mapped.map(item => String(item.id)));
+            state.activeItemsReady = true;
+            return mapped;
+        }
+
+        function rememberOperationalItems(items) {
+            if (!state.activeItemIds || typeof state.activeItemIds.add !== 'function') state.activeItemIds = new Set();
+            state.activeItemsReady = true;
+            (items || []).forEach(item => state.activeItemIds.add(String(item.id)));
         }
 
         // ── ดึงข้อมูล floor/location/parLevel ของสินค้าจาก state.products ──
@@ -1887,7 +1909,7 @@
         // ชื่อสินค้า (normalize) ที่มีคำขอเบิกค้างอยู่ใน state ปัจจุบัน
         function getActiveRequestNames() {
             const set = new Set();
-            state.items.forEach(i => {
+            getOperationalItems().forEach(i => {
                 if (ACTIVE_W1_STATUSES.includes(i.status)) set.add(normItemName(i.itemName));
             });
             return set;
@@ -1964,7 +1986,7 @@
                 const cached = getCache('TRDAKRA_DATA', TRD_CACHE_TTL);
                 hasUsableCache = !!(cached && cached.windowDays === INVENTORY_WINDOW_DAYS);
                 if (hasUsableCache) {
-                    state.items = (cached.rawItems || []).map(mapItemData);
+                    state.items = setOperationalWindow(cached.rawItems || []);
                     state.products = cached.products || [];
                     state.fullHistoryLoaded = false;
                     state.fullHistoryLoading = false;
@@ -1985,7 +2007,7 @@
                 const itemsData = data.items || [];
                 const productsData = data.products || [];
 
-                state.items = itemsData.map(mapItemData);
+                state.items = setOperationalWindow(itemsData);
                 state.fullHistoryLoaded = false;
                 state.fullHistoryLoading = false;
                 state.fullHistoryError = '';
@@ -2353,7 +2375,7 @@
         function setW2Tab(tabName) { state.w2Tab = tabName; state.w2BatchEdits = {}; state.w2PartialQty = {}; renderOrLoadFullHistory(); }
 
         async function clearAllStockout() {
-            const stockoutItems = state.items.filter(i => i.status === 'สินค้าหมด');
+            const stockoutItems = getOperationalItems().filter(i => i.status === 'สินค้าหมด');
             if (stockoutItems.length === 0) return;
             if (!confirm(`ล้างรายการสินค้าหมดทั้งหมด ${stockoutItems.length} รายการ?\nรายการจะย้ายไปประวัติ ไม่สามารถนำกลับมาได้`)) return;
             showLoading('กำลังล้างรายการสินค้าหมด...');
@@ -2598,7 +2620,8 @@
             const res = await saveInventoryDelta(operations, { perfName: 'handleW1Submit' });
             if (!res) { await fetchInitialData(true); return; }
 
-            state.items.unshift(newItem); 
+            state.items.unshift(newItem);
+            rememberOperationalItems([newItem]);
             state.w1Tab = 'pending'; 
             render(); 
             
@@ -2632,7 +2655,7 @@
                     continue;
                 }
                 batchSeen.add(norm);
-                const stockoutMatch = state.items.find(i =>
+                const stockoutMatch = getOperationalItems().find(i =>
                     i.status === 'สินค้าหมด' && i.itemName === row.itemName
                 );
                 if (stockoutMatch) {
@@ -2738,6 +2761,7 @@
 
             if (newItems.length > 0) {
                 state.items = [...newItems, ...state.items];
+                rememberOperationalItems(newItems);
             }
 
             state.w1Rows = [{ itemName: '', qty: '', storageCapacity: '', floor: '', location: '', parLevel: '', oldExpiry: '', unit: '' }];
@@ -2837,7 +2861,7 @@
         }
 
         async function confirmRecheckAllItems() {
-            const recheckItems = (state.items || []).filter(i => i.status === 'รอตรวจรับ');
+            const recheckItems = getOperationalItems().filter(i => i.status === 'รอตรวจรับ');
             if (recheckItems.length === 0) {
                 alert('ไม่มีรายการที่รอตรวจรับ');
                 return;
@@ -3020,6 +3044,7 @@
             if (!res) { hideLoading(); await fetchInitialData(true); return; }
 
             state.items = [...newItems, ...state.items];
+            rememberOperationalItems(newItems);
             render();
 
             // บันทึก SurveyLog (non-fatal: รายการเบิกถูกบันทึกแล้ว)
@@ -4998,9 +5023,10 @@
         }
 
         function renderHome() {
-            const pending = state.items.filter(i => i.status === 'สั่งเบิก').length;
-            const preparing = state.items.filter(i => i.status === 'กำลังจัดสินค้า').length;
-            const receiving = state.items.filter(i => i.status === 'รอตรวจรับ').length;
+            const operationalItems = getOperationalItems();
+            const pending = operationalItems.filter(i => i.status === 'สั่งเบิก').length;
+            const preparing = operationalItems.filter(i => i.status === 'กำลังจัดสินค้า').length;
+            const receiving = operationalItems.filter(i => i.status === 'รอตรวจรับ').length;
             const missing = state.products.filter(p => !p.floor).length;
             const statuses = [
                 {label:'สั่งเบิก', count:pending, tone:'amber'},
@@ -5030,7 +5056,7 @@
                         </div></section>
                 </div>
                 <section class="trd-panel"><div class="trd-panel-heading"><div><h2>รายการเบิกจ่ายล่าสุด</h2><p>แสดงสูงสุด 20 รายการ เรียงจากวันเบิกล่าสุด</p></div><button class="trd-secondary" onclick="setView('dashboard')">ดูรายงาน <span class="material-icons-round">arrow_forward</span></button></div>
-                    ${renderRequestTable(state.items)}
+                    ${renderRequestTable(operationalItems)}
                 </section>
             </div>`;
         }
@@ -5119,7 +5145,7 @@
                         </button>
                     </div>`;
             } else if (state.w1Tab === 'pending') {
-                let pendingItems = state.items.filter(i => ACTIVE_W1_STATUSES.includes(i.status));
+                let pendingItems = getOperationalItems().filter(i => ACTIVE_W1_STATUSES.includes(i.status));
                 // ให้สินค้าที่รอกดรับ (รอตรวจรับ) ขึ้นมาอยู่บนสุดก่อนรายการสั่งเบิก/กำลังจัดสินค้า
                 pendingItems = pendingItems.slice().sort((a, b) => {
                     const aIsRecheck = a.status === 'รอตรวจรับ' ? 1 : 0;
@@ -5405,8 +5431,9 @@
             const PENDING_STATUSES  = ['สั่งเบิก', 'กำลังจัดสินค้า'];
             const STOCKOUT_STATUS   = 'สินค้าหมด';
 
-            const pendingTasks  = state.items.filter(i => PENDING_STATUSES.includes(i.status));
-            const stockoutItems = state.items.filter(i => i.status === STOCKOUT_STATUS);
+            const operationalItems = getOperationalItems();
+            const pendingTasks  = operationalItems.filter(i => PENDING_STATUSES.includes(i.status));
+            const stockoutItems = operationalItems.filter(i => i.status === STOCKOUT_STATUS);
             const hasPending    = pendingTasks.length > 0;
             const hasStockout   = stockoutItems.length > 0;
 
@@ -6201,6 +6228,7 @@
                     if (!res) { await fetchInitialData(true, true); return; }
                     
                     state.items = [...newOrders, ...state.items];
+                    rememberOperationalItems(newOrders);
                 }
 
                 // Orders may already be saved; the zone is complete only after its report is confirmed.
@@ -6360,7 +6388,7 @@
 
         function renderStorefrontTabs() {
             const survey = state.view === 'check_stock';
-            const waiting = state.items.filter(item => item.status === 'รอตรวจรับ').length;
+            const waiting = getOperationalItems().filter(item => item.status === 'รอตรวจรับ').length;
             return `<nav class="trd-storefront-tabs" aria-label="งานสำรวจและเบิกสินค้า">
                 <button class="${survey ? 'is-active' : ''}" aria-current="${survey ? 'page' : 'false'}" onclick="setView('check_stock')"><span class="material-icons-round">fact_check</span> สำรวจสต็อก</button>
                 <button class="${!survey && state.w1Tab === 'request' ? 'is-active' : ''}" aria-current="${!survey && state.w1Tab === 'request' ? 'page' : 'false'}" onclick="setView('w1'); setW1Tab('request')"><span class="material-icons-round">add</span> เบิกสินค้า</button>
@@ -6669,7 +6697,7 @@
         function renderTopbar() {
             const user = window.appSession || {};
             const username = currentUser || user.name || user.id || 'Demo';
-            const pendingW1 = state.items.filter(i => ACTIVE_W1_STATUSES.includes(i.status)).length;
+            const pendingW1 = getOperationalItems().filter(i => ACTIVE_W1_STATUSES.includes(i.status)).length;
             const navItems = [
                 { view: 'home', icon: 'home', label: 'หน้าหลัก' },
                 { view: 'check_stock', icon: 'fact_check', label: 'สำรวจสต็อก', count: pendingW1 },
