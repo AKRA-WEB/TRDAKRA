@@ -628,6 +628,12 @@
             .trd-request-form > button { width: calc(100% - 36px); margin: 0 18px 18px !important; }
             body.trdakra-shell #main-view .trd-request-form > button:last-child { width: calc(100% - 36px); margin: 0 18px 18px !important; }
             body.trdakra-shell #main-view .trd-w2 > main > .animate-fade-in { padding: 12px; }
+            body.trdakra-shell #main-view .trd-w1,body.trdakra-shell #main-view .trd-w2 { padding-top: 0; }
+            body.trdakra-shell #main-view .trd-w1 > .trd-redundant-header,body.trdakra-shell #main-view .trd-w2 > .trd-redundant-header { display: flex; align-items: center; }
+            body.trdakra-shell #main-view .trd-w1 > .trd-redundant-header h1,body.trdakra-shell #main-view .trd-w2 > .trd-redundant-header h1 { font-size: 20px; }
+            body.trdakra-shell #main-view .trd-w1 > .trd-redundant-header button[aria-label="กลับหน้าหลัก"],body.trdakra-shell #main-view .trd-w2 > .trd-redundant-header button[aria-label="กลับหน้าหลัก"] { display: grid; place-items: center; min-width: 44px; min-height: 44px; background: #e5e7eb; }
+            body.trdakra-shell #main-view .trd-w1 > .trd-redundant-header > div:last-child > div,body.trdakra-shell #main-view .trd-w2 > .trd-redundant-header > div:last-child > div { display: none; }
+            body.trdakra-shell #main-view .trd-w2 > .trd-redundant-header + div.sticky { margin-top: 16px; }
         }
 
         .trd-storefront-tabs { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; margin: 16px 0 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; }
@@ -666,7 +672,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260924.02";
+        const CURRENT_VERSION = "20260924.03";
 
         const SUPABASE_CONFIG = {
             URL: "https://hgxrrskztbpejirrdpbq.supabase.co"
@@ -5052,6 +5058,7 @@
 
         function renderW1() {
             let content = '';
+            const pageTitle = state.w1Tab === 'pending' ? 'ตรวจรับสินค้า' : state.w1Tab === 'history' ? 'ประวัติการเบิก' : 'เบิกสินค้า';
             if (state.w1Tab === 'request') {
                 content = `
                     <div class="trd-request-form bg-white p-6 rounded-[2rem] shadow-[0_4px_24px_rgb(0,0,0,0.03)] border border-slate-50 space-y-5 animate-fade-in">
@@ -5265,7 +5272,7 @@
             return `
                 <div class="trd-w1 w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col relative">
                     <header class="trd-redundant-header bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
-                        <div class="flex items-center gap-2"><button onclick="setView('home')" aria-label="กลับหน้าหลัก" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button><h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">storefront</span> หน้าร้าน (TRD)</h1></div>
+                        <div class="flex items-center gap-2"><button onclick="setView('home')" aria-label="กลับหน้าหลัก" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button><h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">storefront</span> ${pageTitle}</h1></div>
                         <div class="flex items-center gap-2">
                             <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white" title="รีเฟรชข้อมูล"><span class="material-icons-round text-[20px]">refresh</span></button>
                             <div class="text-[10px] font-semibold tracking-wide bg-black/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-white/10"><span class="material-icons-round text-[14px]">account_circle</span> ${esc(currentUser || 'Demo')}</div>
@@ -5419,6 +5426,7 @@
         function renderW2() {
             const PENDING_STATUSES  = ['สั่งเบิก', 'กำลังจัดสินค้า'];
             const STOCKOUT_STATUS   = 'สินค้าหมด';
+            const pageTitle = state.w2Tab === 'tasks' ? 'จัดสินค้า' : state.w2Tab === 'stockout' ? 'สินค้าหมด' : 'ประวัติการจัดส่ง';
 
             const operationalItems = getOperationalItems();
             const pendingTasks  = operationalItems.filter(i => PENDING_STATUSES.includes(i.status));
@@ -5534,7 +5542,7 @@
                     <header class="trd-redundant-header bg-brand-blue text-white p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
                         <div class="flex items-center gap-2">
                             <button onclick="setView('home')" aria-label="กลับหน้าหลัก" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white"><span class="material-icons-round">arrow_back</span></button>
-                            <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">warehouse</span> คลังสินค้า (AKRA)</h1>
+                            <h1 class="text-[17px] font-bold tracking-wide flex items-center gap-1.5"><span class="material-icons-round text-[20px]">warehouse</span> ${pageTitle}</h1>
                         </div>
                         <div class="flex items-center gap-2">
                             <button onclick="fetchInitialData(true)" class="p-1.5 rounded-full hover:bg-black/10 transition-colors text-white" title="รีเฟรชข้อมูล"><span class="material-icons-round text-[20px]">refresh</span></button>
