@@ -638,6 +638,7 @@
         .trd-storefront-count { color: #7c3aed; background: #f3e8ff; padding: 0 6px; border-radius: 8px; font-size: 11px; }
         @media(max-width: 767px) { .trd-storefront-tabs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; padding: 8px; }.trd-storefront-tabs button { padding: 9px 8px; font-size: 12px; } }
     </style>
+    <link rel="stylesheet" href="insight-dashboard.css">
 </head>
 <body class="trdakra-shell">
 
@@ -665,7 +666,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20260920.04";
+        const CURRENT_VERSION = "20260924.02";
 
         const SUPABASE_CONFIG = {
             URL: "https://hgxrrskztbpejirrdpbq.supabase.co"
@@ -889,8 +890,15 @@
             checkStockSubmitting: false,
             checkStockEditingPar: null,
             checkStockParInput: '',
+            surveyHistoryOpen: false,
             // Analytics Dashboard
-            dashboardTab: 'summary',
+            dashboardTab: 'trend',
+            insightTab: 'overview',
+            insightRange: '30',
+            insightFrom: '',
+            insightTo: '',
+            insightStatus: 'all',
+            insightSearch: '',
             calendarMonth: new Date().getMonth(),
             calendarYear: new Date().getFullYear(),
             calendarWeekOffset: 0,
@@ -2365,6 +2373,7 @@
                 state.locationSheetParLevel = '';
             }
             if (viewName === 'check_stock') {
+                state.surveyHistoryOpen = false;
                 state.checkStockLocation = null;
                 state.checkStockEdits = {};
                 state.checkStockSearch = '';
@@ -2464,10 +2473,9 @@
         }
 
         function setDashboardTab(tab) {
+            if (tab !== 'product' && tab !== 'trend') return;
             state.dashboardTab = tab;
-            if (tab === 'survey' && state.surveyLogs === null && !state.surveyLogsLoading) {
-                fetchSurveyLogs();
-            } else if (tab === 'product') {
+            if (tab === 'product') {
                 if ((!state.productMovementReport || productMovementReportIsStale()) && !state.productMovementLoading) fetchProductMovementReport();
                 else render();
             } else {
@@ -2508,11 +2516,8 @@
                 const d = item.rawDate ? new Date(item.rawDate) : null;
                 if (!d || isNaN(d.getTime())) return;
                 const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-                if (!map[key]) map[key] = { billCount: 0, hasStockout: false, qty: 0 };
-                if (item.status === 'จัดส่งแล้ว' || item.status === 'จัดส่งไม่ครบ' || item.status === 'รับสินค้าแล้ว') {
-                    map[key].billCount++;
-                    map[key].qty += getActualReceivedQty(item);
-                }
+                if (!map[key]) map[key] = { itemCount: 0, hasStockout: false };
+                map[key].itemCount++;
                 if (item.status === 'สินค้าหมด') map[key].hasStockout = true;
             });
             return map;
@@ -2529,7 +2534,7 @@
             render();
             try {
                 const headers = { 'Authorization': `Bearer ${token}` };
-                const res = await fetch(`${TRD_API_URL}?action=getSurveyLogMonthly&month=${encodeURIComponent(selectedMonth)}`, { headers });
+                const res = await fetch(`${TRD_API_URL}?action=getSurveyLogMonthly&month=${encodeURIComponent(selectedMonth.replace('_', '-'))}`, { headers });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 if (!data || data.status !== 'success' || !Array.isArray(data.records || data.details)) {
@@ -2539,7 +2544,9 @@
                 state.surveyLogs = {
                     status: 'success',
                     monthKey: selectedMonth,
-                    details: data.records || data.details || []
+                    details: data.records || data.details || [],
+                    summary: data.summary || null,
+                    availableMonths: data.availableMonths || []
                 };
                 state.surveyMonthKey = selectedMonth;
             } catch(e) {
@@ -3383,24 +3390,9 @@
         function renderDashboard() {
             const filter = state.dashboardFilter;
 
-            let startDate;
-            if (filter === 'week') {
-                startDate = getDisplayedWeekStart();
-            } else {
-                startDate = new Date(state.calendarYear, state.calendarMonth, 1);
-            }
-
-            const dispatchedItems = state.items.filter(i => {
-                const d = i.rawDate ? new Date(i.rawDate) : new Date(0);
-                return (i.status === 'จัดส่งแล้ว' || i.status === 'รับสินค้าแล้ว' || i.status === 'จัดส่งไม่ครบ') && d >= startDate;
-            });
-
             const TABS = [
-                { id: 'summary',  label: 'สรุป',       icon: 'bar_chart' },
-                { id: 'product',  label: 'สินค้า',      icon: 'inventory_2' },
-                { id: 'trend',    label: 'Trend',       icon: 'calendar_month' },
-                { id: 'problems', label: 'หมด/ยกเลิก', icon: 'warning_amber' },
-                { id: 'survey',   label: 'Survey',      icon: 'fact_check' }
+                { id: 'trend',   label: 'ปฏิทิน', icon: 'calendar_month' },
+                { id: 'product', label: 'สินค้าเชิงลึก', icon: 'inventory_2' }
             ];
 
             return `
@@ -3438,11 +3430,7 @@
 
                     <main class="flex-1 overflow-y-auto ${state.dashboardTab === 'product' ? 'p-4 sm:p-6' : 'p-5'} pb-24 space-y-6">
                         ${state.dashboardTab === 'product' ? '' : renderFullHistoryNotice()}
-                        ${state.dashboardTab === 'summary'  ? renderDashboardSummary(dispatchedItems, state.items, startDate) :
-                          state.dashboardTab === 'product'  ? renderDashboardProduct() :
-                          state.dashboardTab === 'trend'    ? renderDashboardTrend() :
-                          state.dashboardTab === 'problems' ? renderDashboardProblems(state.items, startDate) :
-                          renderDashboardSurvey()}
+                        ${state.dashboardTab === 'product' ? renderDashboardProduct() : renderDashboardTrend()}
                     </main>
                 </div>
             `;
@@ -3520,6 +3508,7 @@
             }
 
             return `
+                <p class="text-xs text-slate-500 px-1">ปฏิทินนับจำนวนรายการตามวันเบิก · แตะวันที่เพื่อดูรายละเอียด</p>
                 <div class="flex items-center justify-between bg-white p-3 rounded-2xl shadow-[0_2px_8px_rgb(0,0,0,0.04)] border border-slate-100">
                     <button onclick="setCalendarNav(-1)" class="p-2 rounded-xl hover:bg-slate-100 active:bg-slate-200 transition-colors">
                         <span class="material-icons-round text-brand-blue text-[20px]">chevron_left</span>
@@ -3562,25 +3551,25 @@
                         ${cells.map(d => {
                             if (!d) return `<div></div>`;
                             const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-                            const act = actMap[key] || { billCount: 0, hasStockout: false };
+                            const act = actMap[key] || { itemCount: 0, hasStockout: false };
                             const isToday = key === todayKey;
                             const isSelected = key === state.calendarSelectedDate;
 
                             let bg = 'bg-slate-50 text-slate-400';
-                            if (act.billCount >= 6) bg = 'bg-brand-blue text-white';
-                            else if (act.billCount >= 3) bg = 'bg-blue-300 text-blue-900';
-                            else if (act.billCount >= 1) bg = 'bg-blue-100 text-blue-700';
+                            if (act.itemCount >= 6) bg = 'bg-brand-blue text-white';
+                            else if (act.itemCount >= 3) bg = 'bg-blue-300 text-blue-900';
+                            else if (act.itemCount >= 1) bg = 'bg-blue-100 text-blue-700';
 
                             return `
-                                <div onclick="selectCalendarDate('${key}')"
-                                     class="relative rounded-xl p-1.5 text-center cursor-pointer transition-all active:scale-95
+                                <button type="button" onclick="selectCalendarDate('${key}')" aria-label="${key} ${act.itemCount} รายการ" aria-pressed="${isSelected}"
+                                     class="relative w-full rounded-xl p-1.5 text-center cursor-pointer transition-all active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-blue
                                             ${bg}
                                             ${isToday ? 'ring-2 ring-brand-orange ring-offset-1' : ''}
                                             ${isSelected ? 'ring-2 ring-brand-orange shadow-md' : ''}">
                                     <span class="text-[12px] font-bold leading-none">${d.getDate()}</span>
-                                    ${act.billCount > 0 ? `<div class="text-[8px] font-semibold opacity-80 mt-0.5">${act.billCount}บ</div>` : ''}
+                                    ${act.itemCount > 0 ? `<div class="text-[8px] font-semibold opacity-80 mt-0.5">${act.itemCount}</div>` : ''}
                                     ${act.hasStockout ? `<div class="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-rose-500 rounded-full"></div>` : ''}
-                                </div>
+                                </button>
                             `;
                         }).join('')}
                     </div>
@@ -3597,9 +3586,9 @@
                 return d;
             });
 
-            const maxBills = Math.max(1, ...days.map(d => {
+            const maxItems = Math.max(1, ...days.map(d => {
                 const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-                return (actMap[key] || {}).billCount || 0;
+                return (actMap[key] || {}).itemCount || 0;
             }));
 
             const today = new Date();
@@ -3609,22 +3598,22 @@
                     <div class="grid grid-cols-7 gap-1 items-end" style="height:120px">
                         ${days.map((d, i) => {
                             const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-                            const act = actMap[key] || { billCount: 0, hasStockout: false };
-                            const barH = Math.max(4, Math.round((act.billCount / maxBills) * 80));
+                            const act = actMap[key] || { itemCount: 0, hasStockout: false };
+                            const barH = Math.max(4, Math.round((act.itemCount / maxItems) * 80));
                             const isToday = d.toDateString() === today.toDateString();
                             const isSelected = key === state.calendarSelectedDate;
                             const barColor = isSelected ? 'bg-brand-orange' : isToday ? 'bg-brand-blue' : 'bg-blue-300';
 
                             return `
-                                <div onclick="selectCalendarDate('${key}')"
-                                     class="flex flex-col items-center justify-end h-full cursor-pointer gap-0.5">
-                                    <span class="text-[9px] font-bold text-slate-500">${act.billCount > 0 ? act.billCount : ''}</span>
+                                <button type="button" onclick="selectCalendarDate('${key}')" aria-label="${key} ${act.itemCount} รายการ" aria-pressed="${isSelected}"
+                                     class="flex flex-col items-center justify-end h-full w-full cursor-pointer gap-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-blue">
+                                    <span class="text-[9px] font-bold text-slate-500">${act.itemCount > 0 ? act.itemCount : ''}</span>
                                     <div class="w-full rounded-t-lg ${barColor} ${isSelected ? 'ring-1 ring-brand-orange ring-offset-1' : ''} transition-all"
                                          style="height:${barH}px"></div>
                                     <span class="text-[9px] font-semibold ${isToday ? 'text-brand-blue' : 'text-slate-400'}">${DAYS[i]}</span>
                                     <span class="text-[10px] font-bold ${isToday ? 'text-brand-blue' : 'text-slate-600'}">${d.getDate()}</span>
                                     ${act.hasStockout ? `<div class="w-1.5 h-1.5 bg-rose-500 rounded-full"></div>` : `<div class="w-1.5 h-1.5"></div>`}
-                                </div>
+                                </button>
                             `;
                         }).join('')}
                     </div>
@@ -3646,9 +3635,6 @@
                 return k === dateStr;
             });
 
-            const dispatched = dayItems.filter(i => i.status === 'จัดส่งแล้ว' || i.status === 'รับสินค้าแล้ว');
-            const totalQty = dispatched.reduce((s, i) => s + getActualReceivedQty(i), 0);
-
             return `
                 <div class="bg-white rounded-[1.5rem] shadow-[0_4px_16px_rgb(0,0,0,0.03)] border border-slate-100 overflow-hidden animate-fade-in">
                     <div class="bg-brand-blue/5 px-4 py-3 border-b border-slate-100 flex justify-between items-center">
@@ -3657,8 +3643,8 @@
                             <p class="text-sm font-bold text-brand-blue">${displayDate}</p>
                         </div>
                         <div class="text-right">
-                            <p class="text-xs font-bold text-brand-orange">${dispatched.length} บิล</p>
-                            <p class="text-[10px] text-slate-400">${totalQty} ชิ้นรวม</p>
+                            <p class="text-xs font-bold text-brand-orange">${dayItems.length} รายการ</p>
+                            <p class="text-[10px] text-slate-400">ตามวันเบิก</p>
                         </div>
                     </div>
                     ${dayItems.length === 0
@@ -3667,6 +3653,7 @@
                             ${dayItems.map(item => {
                                 const isDispatched = item.status === 'จัดส่งแล้ว' || item.status === 'รับสินค้าแล้ว';
                                 const isStockout = item.status === 'สินค้าหมด';
+                                const unit = getProductUnitClient(item.itemName);
                                 const chipCls = isDispatched ? 'bg-emerald-100 text-emerald-700'
                                               : isStockout   ? 'bg-rose-100 text-rose-700'
                                               :                'bg-slate-100 text-slate-600';
@@ -3677,7 +3664,7 @@
                                             ${item.requestedBy ? `<p class="text-[10px] text-slate-400">โดย: ${esc(item.requestedBy)}</p>` : ''}
                                         </div>
                                         <div class="flex items-center gap-2 flex-shrink-0">
-                                            ${getActualReceivedQty(item) ? `<span class="text-xs font-bold text-brand-orange">${getActualReceivedQty(item)} ชิ้น</span>` : ''}
+                                            <span class="text-xs font-bold text-brand-orange">ขอ ${Number(item.requestQty) || 0} ${esc(unit)}</span>
                                             <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full ${chipCls}">${esc(item.status)}</span>
                                         </div>
                                     </div>
@@ -4920,7 +4907,6 @@
             const data = state.surveyLogs;
             const logs = data.details || [];
             const summary = data.summary || {};
-            const availableMonths = Array.from(new Set((data.availableMonths || []).concat(state.surveyMonthKey))).sort().reverse();
             const selectedMonthLabel = formatSurveyMonthLabel(state.surveyMonthKey);
 
             const sessions = {};
@@ -4932,26 +4918,29 @@
             });
 
             const sessionList = Object.values(sessions).slice(0, 30);
+            const countOr = (value, fallback) => value != null && Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : fallback;
+            const sessionCount = countOr(summary.sessionCount, Object.keys(sessions).length);
+            const needToOrderCount = countOr(summary.needToOrderCount, logs.filter(item => Number(item.needToOrder) > 0).length);
+            const recordCount = countOr(summary.recordCount, logs.length);
 
             return `
                 <div class="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm">
                     <label for="survey-month-select" class="block text-[11px] font-semibold text-slate-500 mb-1.5">เดือนที่ต้องการดู</label>
-                    <select id="survey-month-select" onchange="selectSurveyMonth(this.value)"
-                            class="w-full h-12 rounded-xl border border-slate-200 bg-slate-50 px-3 text-base font-semibold text-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/20">
-                        ${availableMonths.map(month => `<option value="${month}" ${month === state.surveyMonthKey ? 'selected' : ''}>${esc(formatSurveyMonthLabel(month))}</option>`).join('')}
-                    </select>
+                    <input id="survey-month-select" type="month" value="${attr(state.surveyMonthKey.replace('_', '-'))}"
+                           onchange="selectSurveyMonth(this.value.replace('-', '_'))"
+                           class="w-full h-12 rounded-xl border border-slate-200 bg-slate-50 px-3 text-base font-semibold text-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/20">
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
                     <div class="bg-emerald-500 p-4 rounded-[1.5rem] text-white relative overflow-hidden shadow-lg shadow-emerald-500/20">
                         <span class="material-icons-round absolute -right-2 -bottom-2 text-[60px] opacity-10">fact_check</span>
                         <p class="text-[11px] font-semibold text-white/80 tracking-wider mb-1">สำรวจ ${esc(selectedMonthLabel)}</p>
-                        <p class="text-2xl font-bold">${Number(summary.sessionCount || 0).toLocaleString()} <span class="text-xs font-medium text-white/80">ครั้ง</span></p>
+                        <p class="text-2xl font-bold">${sessionCount.toLocaleString()} <span class="text-xs font-medium text-white/80">ครั้ง</span></p>
                     </div>
                     <div class="bg-amber-500 p-4 rounded-[1.5rem] text-white relative overflow-hidden shadow-lg shadow-amber-500/20">
                         <span class="material-icons-round absolute -right-2 -bottom-2 text-[60px] opacity-10">add_shopping_cart</span>
                         <p class="text-[11px] font-semibold text-white/80 uppercase tracking-wider mb-1">รายการต้องเติม</p>
-                        <p class="text-2xl font-bold">${Number(summary.needToOrderCount || 0).toLocaleString()} <span class="text-xs font-medium text-white/80">รายการ</span></p>
+                        <p class="text-2xl font-bold">${needToOrderCount.toLocaleString()} <span class="text-xs font-medium text-white/80">รายการ</span></p>
                     </div>
                 </div>
 
@@ -4994,7 +4983,7 @@
                 </div>
 
                 <div class="text-center pb-2">
-                    <p class="text-[10px] text-slate-400 mb-2">แสดง ${Number(data.detailSessionCount || 0).toLocaleString()} รอบล่าสุด · ${Number(data.detailRecordCount || 0).toLocaleString()} จาก ${Number(summary.recordCount || 0).toLocaleString()} รายการ</p>
+                    <p class="text-[10px] text-slate-400 mb-2">แสดง ${sessionList.length.toLocaleString()} จาก ${sessionCount.toLocaleString()} รอบ · ${logs.length.toLocaleString()} จาก ${recordCount.toLocaleString()} รายการในเดือนนี้</p>
                     <button onclick="fetchSurveyLogs()" class="h-12 px-4 text-xs text-slate-400 underline">รีเฟรชข้อมูล</button>
                 </div>
             `;
@@ -5022,7 +5011,7 @@
                 }).join('') : '<tr><td colspan="5" class="trd-table-empty">ไม่มีรายการในช่วงเวลานี้</td></tr>'}</tbody></table></div>`;
         }
 
-        function renderHome() {
+        function renderHomeLegacy() {
             const operationalItems = getOperationalItems();
             const pending = operationalItems.filter(i => i.status === 'สั่งเบิก').length;
             const preparing = operationalItems.filter(i => i.status === 'กำลังจัดสินค้า').length;
@@ -6397,7 +6386,33 @@
             </nav>`;
         }
 
+        function openSurveyHistory() {
+            state.surveyHistoryOpen = true;
+            if (!state.surveyLogs || state.surveyLogs.monthKey !== state.surveyMonthKey) fetchSurveyLogs();
+            else render();
+        }
+
+        function closeSurveyHistory() {
+            state.surveyHistoryOpen = false;
+            render();
+        }
+
+        function renderSurveyHistoryPage() {
+            return `<div class="w-full max-w-md bg-[#f8fafc] min-h-screen flex flex-col">
+                <header class="bg-brand-blue text-white p-4 flex items-center gap-2 sticky top-0 z-20 shadow-md">
+                    <button onclick="closeSurveyHistory()" aria-label="กลับไปสำรวจสต็อก" class="p-1.5 rounded-full hover:bg-black/10 text-white"><span class="material-icons-round">arrow_back</span></button>
+                    <h1 class="text-[17px] font-bold">ประวัติการสำรวจสต็อก</h1>
+                </header>
+                ${renderStorefrontTabs()}
+                <main class="flex-1 overflow-y-auto p-5 pb-24 space-y-5 animate-fade-in">
+                    <p class="text-xs text-slate-500">ผลสำรวจย้อนหลังตามเดือน พร้อมรายการที่ต้องเติม</p>
+                    ${renderDashboardSurvey()}
+                </main>
+            </div>`;
+        }
+
         function renderCheckStock() {
+            if (state.surveyHistoryOpen) return renderSurveyHistoryPage();
             if (!state.checkStockLocation) {
                 // ─── 1. หน้าเลือกโลเคชั่น (เลือกกล่องตามแมพปิ้ง) ───
                 const floorGroups = {};
@@ -6486,6 +6501,10 @@
                                     </p>
                                 </div>
                             </div>
+                            <button type="button" onclick="openSurveyHistory()" class="w-full min-h-12 px-4 bg-white border border-slate-200 text-brand-blue text-sm font-semibold rounded-xl shadow-sm flex items-center justify-between gap-2">
+                                <span class="flex items-center gap-2"><span class="material-icons-round text-[19px]">history</span> ประวัติการสำรวจ</span>
+                                <span class="material-icons-round text-[18px]">chevron_right</span>
+                            </button>
                             
                             <button onclick="importParLevelsFromHistory()" class="w-full py-2.5 bg-brand-blue/5 hover:bg-brand-blue/10 border border-brand-blue/20 text-brand-blue text-[11px] font-semibold rounded-xl transition-all flex items-center justify-center gap-1.5">
                                 <span class="material-icons-round text-[14px]">download</span> นำเข้า Par Level จากประวัติการเบิก
@@ -6991,5 +7010,6 @@
         };
 
     </script>
+    <script src="insight-dashboard.js"></script>
 </body>
 </html>

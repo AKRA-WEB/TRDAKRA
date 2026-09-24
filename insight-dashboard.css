@@ -1,0 +1,103 @@
+/* Integrated read-only Dashboard; all rules stay inside its root. */
+.insight-dashboard { color: #172033; }
+.insight-dashboard button { cursor: pointer; }
+.insight-dashboard button:focus-visible,
+.insight-dashboard input:focus-visible,
+.insight-dashboard select:focus-visible { outline: 3px solid #81a9ff; outline-offset: 2px; }
+.insight-intro { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 22px; }
+.insight-eyebrow { display: block; color: #4160a7; font-size: 11px; font-weight: 800; letter-spacing: .11em; margin-bottom: 8px; }
+.insight-intro h1 { font-size: 26px; font-weight: 750; line-height: 1.3; letter-spacing: -.02em; margin: 0; }
+.insight-intro p { color: #526178; font-size: 13px; margin: 5px 0 0; }
+.insight-legacy-link { color: #244fbb; font-size: 13px; font-weight: 700; white-space: nowrap; padding: 10px 0; }
+.insight-mobile-actions { display: none; }
+.insight-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; background: #f6f8fc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 16px; }
+.insight-range { display: flex; gap: 3px; background: #e9eef7; border-radius: 8px; padding: 3px; }
+.insight-range button { min-height: 36px; border-radius: 6px; color: #526178; font-size: 12px; font-weight: 650; padding: 6px 12px; }
+.insight-range button[aria-pressed=true] { color: #243b83; background: #fff; box-shadow: 0 1px 3px #1720331c; }
+.insight-dates { display: flex; flex-wrap: wrap; gap: 8px; }
+.insight-dates label,.insight-filters label { display: flex; align-items: center; gap: 6px; color: #526178; font-size: 12px; font-weight: 650; }
+.insight-dates input,.insight-filters input,.insight-filters select { min-height: 36px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #172033; padding: 5px 8px; font-size: 13px; }
+.insight-range-label { color: #526178; font-size: 12px; margin-left: auto; }
+.insight-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid #dce4ef; margin-bottom: 18px; }
+.insight-tabs button { min-height: 46px; padding: 9px 15px; color: #526178; font-size: 13px; font-weight: 650; white-space: nowrap; border-bottom: 2px solid transparent; }
+.insight-tabs button[aria-current=page] { color: #2458cb; border-color: #2563eb; }
+.insight-content { display: grid; gap: 18px; }
+.insight-metrics { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; }
+.insight-metrics--three,.insight-detail-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
+.insight-metric { min-width: 0; border: 1px solid #e1e8f0; border-radius: 10px; background: #fff; padding: 16px; }
+.insight-metric span,.insight-metric small { display: block; color: #526178; font-size: 12px; line-height: 1.4; }
+.insight-metric span { font-weight: 650; }
+.insight-metric strong { display: block; color: #172033; font-size: 27px; font-weight: 750; line-height: 1.25; font-variant-numeric: tabular-nums; margin: 8px 0 4px; }
+.insight-metric.amber strong { color: #a45d08; }.insight-metric.blue strong { color: #2458cb; }
+.insight-metric.green strong { color: #08745a; }.insight-metric.rose strong { color: #ae3545; }
+.insight-columns { display: grid; grid-template-columns: minmax(0,1.28fr) minmax(300px,1fr); gap: 18px; }
+.insight-card { min-width: 0; border: 1px solid #e1e8f0; border-radius: 10px; background: #fff; overflow: hidden; }
+.insight-card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 62px; padding: 14px 18px; border-bottom: 1px solid #e9edf3; }
+.insight-card-head h2 { color: #172033; font-size: 15px; font-weight: 700; margin: 0; }
+.insight-card-head p,.insight-card-head span { color: #526178; font-size: 12px; margin: 3px 0 0; }
+.insight-card-head button { color: #2458cb; font-size: 12px; font-weight: 700; }
+.insight-stage-list { display: grid; gap: 19px; padding: 22px 18px; }
+.insight-stage-list > div { display: grid; grid-template-columns: 130px minmax(0,1fr) 24px; align-items: center; gap: 12px; color: #475569; font-size: 13px; }
+.insight-stage-list strong { color: #172033; text-align: right; }
+.insight-track { height: 11px; border-radius: 5px; background: #edf1f5; overflow: hidden; }
+.insight-track i { display: block; height: 100%; border-radius: 5px; background: #9fb0cf; }
+.insight-track .pending { background: #d69a34; }.insight-track .preparing { background: #5979d7; }
+.insight-track .awaiting { background: #42a6bd; }.insight-track .received { background: #33a47d; }
+.insight-track .exception { background: #b8becb; }
+.insight-foot { color: #526178; font-size: 12px; line-height: 1.55; padding: 0 18px 17px; margin: 0; }
+.insight-actions { padding: 3px 18px; }
+.insight-actions button { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 57px; border-bottom: 1px solid #e9edf3; color: #334155; text-align: left; font-size: 13px; }
+.insight-actions button:last-child { border: 0; }.insight-actions button:hover,.insight-list-row:hover { background: #f7faff; }
+.insight-actions button span:first-child { flex: 1; font-weight: 650; }.insight-actions b { color: #2458cb; }
+.insight-list-row { display: flex; justify-content: space-between; gap: 12px; width: 100%; text-align: left; padding: 12px 18px; border-bottom: 1px solid #edf1f5; }
+.insight-list-row:last-child { border: 0; }.insight-list-row strong { display: block; color: #172033; font-size: 13px; font-weight: 650; }
+.insight-list-row small { display: block; color: #526178; font-size: 12px; margin-top: 3px; }
+.insight-list-row > span:last-child { text-align: right; flex-shrink: 0; }
+.insight-trend { height: 189px; padding: 18px 18px 10px; display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 8px; align-items: end; }
+.insight-trend > div { display: grid; justify-items: center; gap: 3px; color: #526178; }
+.insight-trend-track { height: 122px; width: min(100%,28px); display: flex; align-items: end; background: #eef2f8; border-radius: 4px; overflow: hidden; }
+.insight-trend-track i { display: block; width: 100%; background: #5379d5; border-radius: 4px; }
+.insight-trend small { font-size: 11px; }.insight-trend strong { font-size: 11px; color: #172033; }
+.insight-note { color: #526178; background: #f6f8fc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 11px 13px; margin: 0; font-size: 12px; line-height: 1.6; }
+.insight-table th,.insight-table td { white-space: nowrap; }
+.insight-table td:first-child { white-space: normal; }
+.insight-record-table { min-width: 850px; }.insight-record-table td { min-width: 145px; }
+.insight-record-table td:first-child { min-width: 185px; }.insight-record-table td:last-child { min-width: 125px; }
+.insight-id { color: #2458cb; font-weight: 750; text-decoration: underline; text-underline-offset: 2px; }
+.insight-filter-head { flex-wrap: wrap; }.insight-filters { display: flex; flex-wrap: wrap; gap: 10px; }
+.insight-filters input { width: 215px; }.insight-empty { color: #526178; font-size: 13px; padding: 24px 18px; margin: 0; }
+.insight-dialog { border: 1px solid #dce4ef; border-radius: 12px; padding: 0; width: min(700px,calc(100vw - 28px)); max-height: min(90vh,850px); box-shadow: 0 24px 70px #17203338; }
+.insight-dialog::backdrop { background: #0c193699; }
+.insight-dialog-head { display: flex; justify-content: space-between; gap: 12px; padding: 19px 21px; border-bottom: 1px solid #e9edf3; }
+.insight-dialog-head span { color: #526178; font-size: 12px; }.insight-dialog-head h2 { color: #172033; font-size: 19px; font-weight: 750; margin: 3px 0 7px; }
+.insight-dialog-head button { align-self: start; width: 32px; height: 32px; color: #475569; }
+.insight-dialog-body { padding: 20px 21px; }.insight-dialog-body h3 { margin: 23px 0 8px; font-size: 14px; font-weight: 750; }
+.insight-detail-grid { display: grid; gap: 9px; }.insight-detail-grid .insight-metric { padding: 12px; }.insight-detail-grid .insight-metric strong { font-size: 19px; }
+.insight-event { display: grid; grid-template-columns: 80px minmax(0,1fr); gap: 0 12px; padding: 10px 0; border-bottom: 1px solid #edf1f5; font-size: 13px; }
+.insight-event > span { grid-row: span 2; color: #526178; }.insight-event strong { color: #172033; }.insight-event small { color: #526178; font-size: 12px; }
+.insight-detail-note { color: #475569; font-size: 13px; }.insight-dialog .insight-note { margin-top: 18px; }
+@media(max-width:1100px) { .insight-metrics { grid-template-columns: repeat(3,minmax(0,1fr)); }.insight-columns { grid-template-columns: 1fr; } }
+@media(max-width:767px) {
+    .insight-intro { align-items: start; flex-direction: column; gap: 3px; }.insight-intro h1 { font-size: 21px; }
+    .insight-legacy-link { display: none; }
+    .insight-mobile-actions { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin: 17px 0 20px; }
+    .insight-mobile-action { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; min-height: 106px; padding: 11px; border: 1px solid; border-radius: 11px; text-align: left; }
+    .insight-mobile-action.survey { color: #1c4eaa; background: #edf4ff; border-color: #c8dcfa; }
+    .insight-mobile-action.prepare { color: #8d5107; background: #fff6e7; border-color: #f3ddba; }
+    .insight-mobile-action.receive { color: #08735f; background: #eaf8f3; border-color: #bfe8d9; }
+    .insight-mobile-action:active { transform: scale(.98); }
+    .insight-mobile-action-top { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 8px; }
+    .insight-mobile-action-top b { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; background: #ffffffb8; font-size: 11px; line-height: 1; }
+    .insight-mobile-action-top .material-icons-round { font-size: 19px; }
+    .insight-mobile-action strong { display: block; font-size: 13px; font-weight: 750; line-height: 1.2; }
+    .insight-mobile-action small { display: block; font-size: 11px; font-weight: 550; line-height: 1.25; margin-top: 5px; }
+    .insight-toolbar { align-items: start; }
+    .insight-range-label { margin: 0; }.insight-tabs button { padding: 9px 12px; }
+    .insight-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
+    .insight-metric { padding: 13px; }.insight-metric strong { font-size: 22px; }
+    .insight-stage-list > div { grid-template-columns: 110px minmax(0,1fr) 20px; gap: 7px; font-size: 12px; }
+    .insight-card-head { padding: 13px; }.insight-filter-head { align-items: stretch; }
+    .insight-filters { width: 100%; }.insight-filters label { flex: 1 1 150px; align-items: start; flex-direction: column; }
+    .insight-filters input,.insight-filters select { width: 100%; }
+    .insight-detail-grid { grid-template-columns: 1fr; }.insight-dialog-body { padding: 15px; }
+}

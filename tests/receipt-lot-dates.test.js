@@ -102,6 +102,7 @@ sandbox.window.sessionStorage = sandbox.sessionStorage;
 sandbox.window.document = sandbox.document;
 vm.createContext(sandbox);
 vm.runInContext(script, sandbox);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'insight-dashboard.js'), 'utf8'), sandbox);
 vm.runInContext("window.appSession={id:'receipt-fixture',identityId:'10000000-0000-4000-8000-000000000011',sessionVersion:1,authorizationRevision:'fixture'}; sessionToken='receipt-fixture-token';", sandbox);
 vm.runInContext('AppVersionGuard.start({ current: CURRENT_VERSION, readActions: [] })', sandbox);
 

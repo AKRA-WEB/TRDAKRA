@@ -178,7 +178,7 @@ vm.runInContext(`
     {id:'new', itemName:'Flour <sample>', requestQty:3, status:'รอตรวจรับ', rawDate:'2026-09-15T00:00:00Z'}
   ];
 `, sandbox);
-const home = sandbox.renderHome();
+const home = sandbox.renderHomeLegacy();
 const values = [...home.matchAll(/<strong>(\d+)<\/strong><small>/g)].map(m => Number(m[1]));
 assert.deepEqual(values, [1, 0, 1, 0], 'home counts actual request/preparing/recheck/unlocated states');
 const beforeItems = vm.runInContext('JSON.stringify(state.items)', sandbox);
@@ -190,7 +190,7 @@ assert.equal(vm.runInContext('JSON.stringify(state.items)', sandbox), beforeItem
 assert.equal((table.match(/<tbody>[\s\S]*?<\/tbody>/)[0].match(/<tr>/g) || []).length, 2);
 assert.match(sandbox.renderRequestTable([]), /ไม่มีรายการในช่วงเวลานี้/);
 vm.runInContext('state.items = []; state.products = [];', sandbox);
-assert.deepEqual([...sandbox.renderHome().matchAll(/<strong>(\d+)<\/strong><small>/g)].map(m => Number(m[1])), [0,0,0,0]);
+assert.deepEqual([...sandbox.renderHomeLegacy().matchAll(/<strong>(\d+)<\/strong><small>/g)].map(m => Number(m[1])), [0,0,0,0]);
 const summary = sandbox.renderDashboardSummary([], [], new Date('2026-09-01'));
 assert.match(summary, /ไม่มีข้อมูลในช่วงเวลานี้/);
 assert.match(summary, /ไม่มีข้อมูลผู้ขอเบิกในช่วงนี้/);
@@ -215,3 +215,45 @@ assert.match(storefrontTabs,/setW1Tab\('history'\)/);
 vm.runInContext("state.view = 'check_stock';",sandbox);
 assert.match(sandbox.renderStorefrontTabs(),/is-active[^>]+setView\('check_stock'\)/);
 console.log('PASS: Survey-first navigation grouping, parent selection and manual/receiving/history access.');
+
+vm.runInContext(`
+  state.items = [];
+  state.dashboardTab = 'trend';
+  state.surveyMonthKey = '2026_09';
+  state.surveyLogs = {monthKey:'2026_09',details:[
+    {surveyDate:'2026-09-24',floor:'1',productName:'Flour',currentStock:2,parLevel:5,needToOrder:3,surveyedBy:'A',sessionKey:'survey-1'},
+    {surveyDate:'2026-09-24',floor:'1',productName:'Sugar',currentStock:5,parLevel:5,needToOrder:0,surveyedBy:'A',sessionKey:'survey-1'}
+  ]};
+  state.surveyHistoryOpen = true;
+`, sandbox);
+const analytics = sandbox.renderDashboard();
+assert.match(analytics, /ปฏิทิน/);
+assert.match(analytics, /สินค้าเชิงลึก/);
+assert.doesNotMatch(analytics, /สรุป|หมด\/ยกเลิก|Survey/);
+const surveyHistory = sandbox.renderCheckStock();
+assert.match(surveyHistory, /ประวัติการสำรวจสต็อก/);
+assert.match(surveyHistory, /สำรวจ กันยายน 2569/);
+assert.match(surveyHistory, /1 <span[^>]*>ครั้ง/);
+assert.match(surveyHistory, /1 <span[^>]*>รายการ/);
+assert.match(surveyHistory, /Flour/);
+console.log('PASS: Analytics keeps only detailed reports and survey history remains available in stock survey.');
+
+let surveyUrl = '';
+let surveyAuth = '';
+sandbox.fetch = async (url, options) => {
+  surveyUrl = String(url);
+  surveyAuth = options.headers.Authorization;
+  return {ok:true,json:async()=>({status:'success',records:[
+    {surveyDate:'2026-08-12',floor:'2',productName:'Butter',currentStock:1,parLevel:4,needToOrder:3,surveyedBy:'B',sessionKey:'aug-1'}
+  ]})};
+};
+vm.runInContext("sessionToken = 'survey-fixture-token';", sandbox);
+sandbox.fetchSurveyLogs('2026_08').then(() => {
+  assert.match(surveyUrl, /action=getSurveyLogMonthly&month=2026-08$/);
+  assert.equal(surveyAuth, 'Bearer survey-fixture-token');
+  const august = sandbox.renderCheckStock();
+  assert.match(august, /สำรวจ สิงหาคม 2569/);
+  assert.match(august, /Butter/);
+  assert.match(august, /1 <span[^>]*>รายการ/);
+  console.log('PASS: Monthly Survey read uses the current API month and records contract.');
+});
