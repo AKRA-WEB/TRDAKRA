@@ -610,6 +610,7 @@
         body.trdakra-shell #main-view .trd-fields input,body.trdakra-shell #main-view .trd-fields select { min-height: 42px; border-radius: 7px !important; font-size: 14px; }
         .trd-request-form > button { width: calc(100% - 48px); margin: 0 24px 20px !important; border-radius: 8px !important; min-height: 44px; font-size: 13px; }
         body.trdakra-shell #main-view .trd-request-form > button:last-child { width: auto; display: block; margin-left: auto !important; padding: 12px 24px; background: #243b83 !important; }
+        .trd-item-name { white-space: normal; overflow-wrap: anywhere; }
         body.trdakra-shell #main-view .trd-w2 > main > .animate-fade-in { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; }
         body.trdakra-shell #main-view .trd-w2 > main > .animate-fade-in > .space-y-2 { border-top: 1px solid #e2e8f0; }
         body.trdakra-shell #main-view .trd-w2 > main > .animate-fade-in > .space-y-2 > div { margin: 0; border: 0; border-bottom: 1px solid #e2e8f0; border-radius: 0; }
@@ -672,7 +673,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20261002.01";
+        const CURRENT_VERSION = "20261004.01";
 
         const SUPABASE_CONFIG = {
             URL: "https://hgxrrskztbpejirrdpbq.supabase.co"
@@ -5182,8 +5183,8 @@
                         const enc  = encodeURIComponent(item.id);
                         const itemHeader = `
                             <div class="flex justify-between items-start mb-4">
-                                <div class="pr-2">
-                                    <h3 class="font-bold text-brand-blue text-[16px] leading-snug">${esc(item.itemName)}</h3>
+                                <div class="flex-1 min-w-0 pr-2">
+                                    <h3 class="trd-item-name font-bold text-brand-blue text-[16px] leading-snug">${esc(item.itemName)}</h3>
                                     <div class="flex items-center gap-1.5 text-[10px] text-slate-400 mt-1 font-medium flex-wrap">
                                         <span class="font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[9px] font-semibold">ID: ${item.id}</span>
                                         <span class="inline-flex items-center gap-0.5 text-slate-500">
@@ -5345,10 +5346,10 @@
             return `
                 <div class="rounded-2xl border shadow-sm mb-2 overflow-hidden ${rowBg}">
                     <div onclick="toggleW2BatchItem(decodeURIComponent('${enc}'))"
-                         class="flex items-center gap-3 p-3.5 cursor-pointer active:scale-[0.99] transition-all select-none">
+                         class="flex items-start gap-3 p-3.5 cursor-pointer active:scale-[0.99] transition-all select-none">
                         <div class="w-9 h-9 flex-shrink-0 flex items-center justify-center font-bold rounded-xl ${boxClass}">${boxContent}</div>
                         <div class="flex-1 min-w-0">
-                            <p class="text-sm leading-snug truncate ${nameClass}">${esc(item.itemName)}</p>
+                            <p class="trd-item-name text-sm leading-snug ${nameClass}">${esc(item.itemName)}</p>
                             <p class="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1 flex-wrap">
                                 ${item.requestedBy ? `<span class="font-medium text-slate-500">${esc(item.requestedBy)}</span><span>·</span>` : ''}
                                 <span>${item.timestamp || ''}</span>
@@ -5370,7 +5371,7 @@
                 dialog.style.cssText = 'border:0;border-radius:16px;padding:24px;width:min(440px,90vw);max-height:90vh;overflow:auto';
                 dialog.innerHTML = `<form method="dialog">
                     <h2 class="text-lg font-bold mb-3">ยืนยันส่งเกินยอดเบิก</h2>
-                    <p>${esc(item.itemName)}</p>
+                    <p class="trd-item-name">${esc(item.itemName)}</p>
                     <p class="my-3">เบิก ${Number(item.requestQty)} · ส่งจริง ${sentQty} · เกิน ${sentQty - Number(item.requestQty)}</p>
                     <label for="over-dispatch-reason" class="block font-bold mb-2">เหตุผลที่ส่งเกิน</label>
                     <textarea id="over-dispatch-reason" required maxlength="500" rows="3" class="w-full border rounded-lg p-3"></textarea>
@@ -5554,7 +5555,7 @@
                                     return `
                                     <div class="bg-white rounded-2xl border ${isRestoring ? 'border-emerald-300 shadow-emerald-100 shadow-md' : 'border-rose-200/60'} p-4 flex items-center gap-3 transition-all">
                                         <div class="flex-1 min-w-0">
-                                            <p class="font-bold text-slate-800 text-sm truncate">${esc(item.itemName || '—')}</p>
+                                            <p class="trd-item-name font-bold text-slate-800 text-sm leading-snug">${esc(item.itemName || '—')}</p>
                                             <div class="flex items-center gap-2 mt-1 flex-wrap">
                                                 <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${isRestoring ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600'}">
                                                     ${isRestoring ? '✓ กำลังกู้คืน' : '❌ หมด'}
