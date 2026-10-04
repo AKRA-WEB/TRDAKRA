@@ -673,7 +673,7 @@
         // 0. AUTHENTICATION & LOG SYSTEM (AKRA SSO v2)
         // ==========================================
         const CURRENT_APP_NAME = "TRDAKRA";
-        const CURRENT_VERSION = "20261004.01";
+        const CURRENT_VERSION = "20261004.02";
 
         const SUPABASE_CONFIG = {
             URL: "https://hgxrrskztbpejirrdpbq.supabase.co"
@@ -2609,6 +2609,11 @@
             // Don't call render() here to avoid losing focus during typing
         }
 
+        function createRequestId() {
+            const bytes = crypto.getRandomValues(new Uint8Array(16));
+            return `REQ-${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;
+        }
+
         async function handleW1Submit(event) {
             event.preventDefault();
             const itemName = document.getElementById('w1-itemName').value;
@@ -2626,7 +2631,7 @@
 
             const now = new Date();
             const newItem = {
-                id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
+                id: createRequestId(),
                 rawDate: now,
                 timestamp: formatDateTime(now.toISOString()),
                 itemName: itemName,
@@ -2718,7 +2723,7 @@
 
             // สร้างรายการใหม่
             const newItems = toCreate.map(row => ({
-                id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
+                id: createRequestId(),
                 rawDate: now,
                 timestamp,
                 itemName: row.itemName,
@@ -3038,7 +3043,7 @@
             });
 
             const newItems = orderList.map(item => ({
-                id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
+                id: createRequestId(),
                 rawDate: now,
                 timestamp,
                 itemName: item.name,
@@ -6235,7 +6240,7 @@
                     if (need > 0 && !isDup) {
                         seenOrder.add(norm);
                         newOrders.push({
-                            id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
+                            id: createRequestId(),
                             rawDate: now,
                             timestamp: timestamp,
                             itemName: p.name,
